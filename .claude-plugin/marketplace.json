@@ -1,0 +1,22 @@
+{
+  "name": "claude-skills",
+  "owner": {
+    "name": "Przemyslaw Szypowicz"
+  },
+  "plugins": [
+    {
+      "name": "ado",
+      "source": "./plugins/ado",
+      "description": "Azure DevOps operations -- PRs, pipelines, policies, builds, variable groups, environments, feeds, branches, work items, comments.",
+      "version": "1.0.0",
+      "tags": ["azure-devops", "ado", "pipelines", "pull-requests", "work-items", "ci-cd"]
+    },
+    {
+      "name": "swift-concurrency",
+      "source": "./plugins/swift-concurrency",
+      "description": "Diagnose data races, implement actor isolation, resolve Sendable issues, fix @Observable + @MainActor interaction problems, and guide Swift 6 migration.",
+      "version": "1.0.0",
+      "tags": ["swift", "concurrency", "ios", "macos", "swiftui", "observable", "actors", "sendable", "swift6"]
+    }
+  ]
+}

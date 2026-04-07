@@ -1,0 +1,8 @@
+{
+  "name": "swift-concurrency",
+  "description": "Diagnose data races, implement actor isolation, resolve Sendable issues, fix @Observable + @MainActor interaction problems, and guide Swift 6 migration. Use when developers work with Swift Concurrency, async/await, actors, tasks, @MainActor, Sendable, or @Observable in concurrent contexts.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Przemyslaw Szypowicz"
+  }
+}
