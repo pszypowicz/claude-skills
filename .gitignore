@@ -1,0 +1,13 @@
+# Skill-creator test workspaces
+*-workspace/
+
+# Plan files
+plans/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp

@@ -17,6 +17,13 @@
       "description": "Diagnose data races, implement actor isolation, resolve Sendable issues, fix @Observable + @MainActor interaction problems, and guide Swift 6 migration.",
       "version": "1.0.0",
       "tags": ["swift", "concurrency", "ios", "macos", "swiftui", "observable", "actors", "sendable", "swift6"]
+    },
+    {
+      "name": "go-dev",
+      "source": "./plugins/go-dev",
+      "description": "Go development with toolchain-first verification workflow -- writing, testing, debugging, profiling, and dependency management.",
+      "version": "1.0.0",
+      "tags": ["go", "golang", "testing", "concurrency", "profiling", "modules", "go-vet", "go-doc", "go-fix"]
     }
   ]
 }
