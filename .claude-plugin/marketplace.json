@@ -24,6 +24,13 @@
       "description": "Go development with toolchain-first verification workflow -- writing, testing, debugging, profiling, and dependency management.",
       "version": "1.0.0",
       "tags": ["go", "golang", "testing", "concurrency", "profiling", "modules", "go-vet", "go-doc", "go-fix"]
+    },
+    {
+      "name": "modern-swift",
+      "source": "./plugins/modern-swift",
+      "description": "Swift language features beyond concurrency: attributes (@available, @discardableResult, @frozen, @inlinable, @backDeployed, @resultBuilder, @propertyWrapper) and macro usage (#Preview, custom macros).",
+      "version": "0.1.0",
+      "tags": ["swift", "ios", "macos", "swiftui", "attributes", "macros", "property-wrapper", "result-builder", "library-evolution"]
     }
   ]
 }

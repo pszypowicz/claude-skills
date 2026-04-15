@@ -1,0 +1,8 @@
+{
+  "name": "modern-swift",
+  "description": "Swift language features beyond concurrency: attributes (@available, @backDeployed, @discardableResult, @inlinable, @frozen, @resultBuilder, @propertyWrapper) and macro usage (#Preview, custom macros). Use when working with availability, library evolution, result builders, property wrappers, or Swift macros.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Przemyslaw Szypowicz"
+  }
+}
