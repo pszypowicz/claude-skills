@@ -163,6 +163,28 @@ az pipelines update --id <id> --name <name> --org "$ADO_ORG" -p "$ADO_PROJECT" -
 az pipelines delete --id <id> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 ```
 
+### Run specific stages only (skip others)
+
+`az pipelines run` does not expose `stagesToSkip`. Use the `/pipelines/{id}/runs` REST endpoint directly. Stages listed in `stagesToSkip` end `skipped`, and downstream stages that depend on them run **as if the upstream succeeded** - so this is the correct way to rerun e.g. only a cleanup/destroy stage after a cancelled apply, without editing the pipeline YAML or adding approval gates.
+
+```bash
+# Identifier is the YAML `- stage: <id>`, not the displayName. Grab it from a
+# prior run's timeline: `records[].type == 'Stage'` -> `.identifier`.
+curl -sS -u ":$AZURE_DEVOPS_EXT_PAT" -X POST \
+  "$ADO_ORG/$ADO_PROJECT/_apis/pipelines/<pipelineId>/runs?api-version=7.1-preview.1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "resources": { "repositories": { "self": { "refName": "refs/heads/<branch>" } } },
+    "stagesToSkip": ["RepoValidate", "TerraformValidate", "TerraformPlan", "TerraformApply"]
+  }'
+```
+
+Common use case: previous BVP run was cancelled mid-apply, leaving an orphan resource group in state. Skip every upstream stage and let only `TerraformDestroy` run - it reads the existing state backend and tears down what the cancelled apply created.
+
+Contrast with cancellation cascade (which is _not_ overridden by `stagesToSkip` on a running build): when a running build is cancelled, the upstream ends `Canceled` and downstream defaults to `Skipped` via the implicit `succeeded()` condition. No rerun button appears on the skipped stage. The fix there is a fresh queue with `stagesToSkip` as above, **not** re-running within the cancelled build.
+
+Note: the older `/build/builds?api-version=7.1` endpoint silently ignores `stagesToSkip`. Use `/pipelines/{id}/runs?api-version=7.1-preview.1`.
+
 ## Policy Operations
 
 ```bash
