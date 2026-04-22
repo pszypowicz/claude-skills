@@ -46,7 +46,9 @@ ado_resolve_auth() {
 ado_api() {
   local method="$1" path="$2" body="${3:-}" api_version="${4:-7.1}"
 
-  [[ -z "${ADO_AUTH_HEADER:-}" ]] && ado_resolve_auth
+  if [[ -z "${ADO_AUTH_HEADER:-}" ]]; then
+    ado_resolve_auth || return 1
+  fi
 
   local url="${ADO_ORG}/${ADO_PROJECT}/_apis/${path}"
   # Append api-version (handle existing query params)
@@ -80,7 +82,9 @@ ado_api_preview() {
 ado_api_org() {
   local method="$1" path="$2" body="${3:-}" api_version="${4:-7.1}"
 
-  [[ -z "${ADO_AUTH_HEADER:-}" ]] && ado_resolve_auth
+  if [[ -z "${ADO_AUTH_HEADER:-}" ]]; then
+    ado_resolve_auth || return 1
+  fi
 
   local url="${ADO_ORG}/_apis/${path}"
   if [[ "$url" == *"?"* ]]; then
@@ -108,7 +112,9 @@ ado_api_org() {
 ado_api_feeds() {
   local method="$1" path="$2" body="${3:-}" api_version="${4:-7.1}"
 
-  [[ -z "${ADO_AUTH_HEADER:-}" ]] && ado_resolve_auth
+  if [[ -z "${ADO_AUTH_HEADER:-}" ]]; then
+    ado_resolve_auth || return 1
+  fi
 
   # Replace dev.azure.com with feeds.dev.azure.com
   local feeds_org="${ADO_ORG/dev.azure.com/feeds.dev.azure.com}"
@@ -139,7 +145,9 @@ ado_get_project_id() {
     return
   fi
 
-  [[ -z "${ADO_AUTH_HEADER:-}" ]] && ado_resolve_auth
+  if [[ -z "${ADO_AUTH_HEADER:-}" ]]; then
+    ado_resolve_auth || return 1
+  fi
 
   _ADO_PROJECT_ID=$(curl -s -S --fail-with-body \
     -H "$ADO_AUTH_HEADER" \
