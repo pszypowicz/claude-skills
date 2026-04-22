@@ -82,7 +82,10 @@ az repos pr update --id <ID> --status abandoned --org "$ADO_ORG" --detect false
 az repos pr set-vote --id <ID> --vote approve --org "$ADO_ORG" --detect false
 
 # Add reviewers (optional or required)
-# NOTE: email lookup fails with PAT auth — use identity GUIDs from work item custom fields instead
+# NOTE: az repos pr reviewer add fails under PAT auth with "A valid reviewer must
+# be supplied." regardless of input format (email, entitlement GUID, identity GUID).
+# Use REST PUT with an identity GUID resolved from vssps - see "Reviewer identity
+# resolution" below.
 az repos pr reviewer add --id <ID> --reviewers <GUID1> <GUID2> --required true \
   --org "$ADO_ORG" --detect false
 
@@ -94,6 +97,28 @@ az repos pr work-item add --id <PR_ID> --work-items <WI_ID> \
 az repos pr policy list --id <ID> -o json --org "$ADO_ORG" --detect false  # find failed evaluation IDs
 az repos pr policy queue --id <ID> -e <eval-id> --org "$ADO_ORG" --detect false
 ```
+
+### Reviewer identity resolution
+
+Adding PR reviewers under PAT auth requires the **vssps identity id**, not the entitlement id returned by `az devops user list`. They are different GUIDs for the same user, and only the vssps one works. `az repos pr reviewer add` fails for both, so use REST:
+
+```bash
+AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64)"
+VSSPS="${ADO_ORG/dev.azure.com/vssps.dev.azure.com}"
+REPO_ID=$(az repos show -r <repo> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false --query id -o tsv)
+
+# 1. Resolve identity id from email
+REVIEWER_ID=$(curl -sS -H "$AUTH" \
+  "${VSSPS}/_apis/identities?searchFilter=General&filterValue=<email>&api-version=7.1" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['value'][0]['id'])")
+
+# 2. Add as required reviewer
+curl -sS -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+  "${ADO_ORG}/_apis/git/repositories/${REPO_ID}/pullRequests/<PR_ID>/reviewers/${REVIEWER_ID}?api-version=7.1" \
+  -d "{\"vote\":0,\"isRequired\":true,\"id\":\"${REVIEWER_ID}\"}"
+```
+
+If the PUT response body comes back empty (no displayName, no error), the id was wrong - re-resolve via vssps instead of retrying with the same value. `az devops user list` ids silently fail this way.
 
 ### PR Comments & Threads
 
