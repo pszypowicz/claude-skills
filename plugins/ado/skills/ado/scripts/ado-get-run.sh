@@ -32,6 +32,8 @@ done
 
 [[ -z "$RUN_ID" ]] && { log_error "--run-id is required"; usage; }
 
+ado_require_env
+
 log_info "Fetching run #${RUN_ID}..."
 
 run_json=$(ado_api GET "build/builds/${RUN_ID}")

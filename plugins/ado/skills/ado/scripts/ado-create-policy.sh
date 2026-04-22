@@ -71,6 +71,8 @@ done
 [[ "$TYPE" == "build" && -z "$PIPELINE_ID" ]] && { log_error "--pipeline-id is required for build type"; usage; }
 [[ "$TYPE" == "required-reviewer" && ${#REVIEWERS[@]} -eq 0 ]] && { log_error "--reviewer is required for required-reviewer type"; usage; }
 
+ado_require_env
+
 # Resolve a reviewer search term to an ADO identity GUID.
 # Accepts: raw GUID, email address, display name, or team name.
 # Users: Graph users API -> descriptor -> Storage Keys API -> GUID

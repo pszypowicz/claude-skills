@@ -39,6 +39,8 @@ done
 [[ -z "$PR_ID" ]] && { log_error "--pr-id is required"; usage; }
 [[ -z "$REPO" ]] && { log_error "--repo is required"; usage; }
 
+ado_require_env
+
 log_info "Fetching threads for PR #${PR_ID} in ${REPO}..."
 
 threads_json=$(ado_api GET "git/repositories/${REPO}/pullRequests/${PR_ID}/threads")

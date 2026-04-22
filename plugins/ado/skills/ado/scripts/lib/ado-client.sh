@@ -7,16 +7,20 @@
 
 set -euo pipefail
 
-ADO_ORG="${ADO_ORG:?Set ADO_ORG (e.g. https://dev.azure.com/myorg)}"
-ADO_PROJECT="${ADO_PROJECT:?Set ADO_PROJECT}"
-
-# Strip trailing slash from org URL
-ADO_ORG="${ADO_ORG%/}"
-
 _ADO_PROJECT_ID=""
 
 log_info()  { printf '[INFO]  %s\n' "$*" >&2; }
 log_error() { printf '[ERROR] %s\n' "$*" >&2; }
+
+# Assert ADO_ORG and ADO_PROJECT are set, and normalize ADO_ORG.
+# Call this from the calling script AFTER arg parsing (so --help and usage
+# errors can surface without requiring auth configuration). Idempotent.
+ado_require_env() {
+  : "${ADO_ORG:?Set ADO_ORG (e.g. https://dev.azure.com/myorg)}"
+  : "${ADO_PROJECT:?Set ADO_PROJECT}"
+  ADO_ORG="${ADO_ORG%/}"
+  export ADO_ORG ADO_PROJECT
+}
 
 ado_resolve_auth() {
   if [[ -n "${AZURE_DEVOPS_EXT_PAT:-}" ]]; then
