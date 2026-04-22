@@ -29,14 +29,14 @@
       "name": "modern-swift",
       "source": "./plugins/modern-swift",
       "description": "Swift language features beyond concurrency: attributes (@available, @discardableResult, @frozen, @inlinable, @backDeployed, @resultBuilder, @propertyWrapper) and macro usage (#Preview, custom macros).",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "tags": ["swift", "ios", "macos", "swiftui", "attributes", "macros", "property-wrapper", "result-builder", "library-evolution"]
     },
     {
       "name": "worktrees",
       "source": "./plugins/worktrees",
       "description": "Batch-provision git worktrees for planned work across multiple repos, plus status/lookup/teardown slash commands.",
-      "version": "0.1.0",
+      "version": "1.0.0",
       "tags": ["git", "worktrees", "workflow", "project-kickoff"]
     }
   ]
