@@ -27,6 +27,7 @@ ado_resolve_auth() {
     ADO_AUTH_HEADER="Authorization: Bearer ${ADO_TOKEN}"
   else
     local token
+    # 499b84ac-... is the public Azure DevOps resource GUID (same for every tenant).
     token=$(az account get-access-token \
       --resource 499b84ac-1321-427f-aa17-267ca6975798 \
       --query accessToken -o tsv 2>/dev/null) \

@@ -1,11 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Go quality check - runs the full verification pipeline in sequence.
-# Usage: go-quality-check.sh [packages] [--skip-test] [--verbose] [--short]
-#
-# Defaults to ./... if no packages specified.
-# Stops on first failure with a clear message about which step failed.
+usage() {
+    cat <<'EOF'
+Usage: go-quality-check.sh [PACKAGES] [--skip-test] [--verbose] [--short]
+
+Run the full Go verification pipeline in sequence: gofmt, go vet,
+staticcheck (if installed), go build, go test -race. Stops on the first
+failure with a clear message about which step failed.
+
+Arguments:
+  PACKAGES       Package pattern to check (default: ./...)
+
+Flags:
+  --skip-test    Skip the go test step
+  --verbose      Pass -v to go test
+  --short        Pass -short to go test
+  -h, --help     Show this help and exit
+
+Examples:
+  go-quality-check.sh
+  go-quality-check.sh ./pkg/... --short
+  go-quality-check.sh --skip-test --verbose
+EOF
+}
 
 PACKAGES=""
 SKIP_TEST=false
@@ -14,10 +32,11 @@ SHORT=""
 
 for arg in "$@"; do
     case "$arg" in
+        -h|--help)   usage; exit 0 ;;
         --skip-test) SKIP_TEST=true ;;
         --verbose)   VERBOSE="-v" ;;
         --short)     SHORT="-short" ;;
-        -*)          echo "Unknown flag: $arg" >&2; exit 1 ;;
+        -*)          echo "Unknown flag: $arg" >&2; usage >&2; exit 1 ;;
         *)           PACKAGES="$arg" ;;
     esac
 done

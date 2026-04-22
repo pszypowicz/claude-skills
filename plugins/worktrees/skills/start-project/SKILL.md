@@ -7,6 +7,8 @@ description: Batch-provision git worktrees for a set of planned tasks across one
 
 Turn a list of planned tasks into ready-to-edit git worktrees. Each task becomes a worktree: a fresh branch checked out from its repo's default branch, materialized at a predictable path so the user (and you) can start editing immediately.
 
+> **Assumed layout:** this skill (and the sibling `/worktree-status`, `/worktree-for`, `/worktree-cleanup` commands) assume clones live under `~/Developer/<provider>/<org>/<repo>` and worktrees under `~/Developer/.worktrees/<session-id>/`. If your repos live elsewhere, adapt the paths throughout before running.
+
 ## Why this exists
 
 Working against a repo's base clone is fine for a single quick change, but falls apart when the user has several concurrent streams of work - commits from one task leak into another, mid-review branches get dirty, and rebasing gets painful. Worktrees give each task its own checkout rooted at the same bare repo, so the streams stay isolated with no extra clones.

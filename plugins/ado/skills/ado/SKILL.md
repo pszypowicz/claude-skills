@@ -105,7 +105,7 @@ az repos pr policy queue --id <ID> -e <eval-id> --org "$ADO_ORG" --detect false
 Adding PR reviewers under PAT auth requires the **vssps identity id**, not the entitlement id returned by `az devops user list`. They are different GUIDs for the same user, and only the vssps one works. `az repos pr reviewer add` fails for both, so use REST:
 
 ```bash
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64)"
+AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
 VSSPS="${ADO_ORG/dev.azure.com/vssps.dev.azure.com}"
 REPO_ID=$(az repos show -r <repo> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false --query id -o tsv)
 
@@ -128,7 +128,7 @@ All PR comment operations require curl with PAT auth (`az rest` does not work wi
 
 ````bash
 # Auth setup (reuse across commands)
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64)"
+AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
 THREADS="${ADO_ORG}/${ADO_PROJECT}/_apis/git/repositories/<repo>/pullRequests/<prId>/threads"
 
 # List active threads (script - handles filtering + formatting)
@@ -300,7 +300,7 @@ Full CRUD on work item comments requires REST API (curl + PAT). The `--discussio
 **@Mentions in comments:** Use the REST API with HTML mention format. The `--discussion` flag renders mentions as plain text.
 
 ```bash
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64)"
+AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
 WI_COMMENTS="${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workItems/<id>/comments"
 
 # Post comment with @mention (use identity GUID and email)
@@ -310,7 +310,7 @@ curl -s -H "$AUTH" -H "Content-Type: application/json" -X POST \
 ```
 
 ```bash
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64)"
+AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
 WI_COMMENTS="${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workItems/<id>/comments"
 
 # List comments (most recent first)
@@ -496,7 +496,7 @@ ${CLAUDE_SKILL_DIR}/scripts/ado-pr-threads.sh --pr-id <ID> --repo <repo> --json 
   | python3 -c "import sys,json; threads=json.load(sys.stdin); t=[x for x in threads if x['id']==<threadId>]; print(json.dumps(t[0],indent=2)) if t else print('Not found')"
 
 # 3. Reply to reviewer feedback
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64)"
+AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
 THREADS="${ADO_ORG}/${ADO_PROJECT}/_apis/git/repositories/<repo>/pullRequests/<ID>/threads"
 curl -s -H "$AUTH" -H "Content-Type: application/json" -X POST \
   "${THREADS}/<threadId>/comments?api-version=7.1" \
@@ -525,7 +525,7 @@ curl -s -H "$AUTH" -H "Content-Type: application/json" -X POST \
 az boards work-item show --id <WI_ID> --expand all --org "$ADO_ORG" --detect false -o json
 
 # 1b. Load work item comments for context
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64)"
+AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
 curl -s -H "$AUTH" -H "Content-Type: application/json" \
   "${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workItems/<WI_ID>/comments?\$top=10&order=desc&api-version=7.1-preview.4"
 
