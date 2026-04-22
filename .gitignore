@@ -4,6 +4,9 @@
 # Plan files
 plans/
 
+# Claude Code local settings (personal, not portable)
+.claude/
+
 # OS
 .DS_Store
 
