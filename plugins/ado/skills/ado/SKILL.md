@@ -34,6 +34,8 @@ If any are **MISSING**, stop and instruct the user:
 > export AZURE_DEVOPS_EXT_PAT=<pat>
 > ```
 
+Prefer the `az` CLI; fall back to `curl` + PAT for REST endpoints that `az` doesn't cover (`az rest` is ARM-only and does not work against ADO APIs).
+
 All `az` commands use `--org "$ADO_ORG" -p "$ADO_PROJECT" --detect false`.
 
 **Exception:** These subcommands are org-scoped — they take `--org` but **not** `--project`:
