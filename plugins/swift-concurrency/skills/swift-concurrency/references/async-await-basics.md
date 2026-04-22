@@ -23,7 +23,7 @@ func fetchUser(id: Int) async throws -> User {
 Key rules:
 - `async` comes before `throws` in the declaration: `async throws`
 - `await` comes before `try` at the call site: `try await`
-- Every `await` is a **suspension point** -- the function may pause and resume on a different thread
+- Every `await` is a **suspension point** - the function may pause and resume on a different thread
 - An async function can only be called from another async context
 
 ### Calling async functions
@@ -302,7 +302,7 @@ func loadUser() async {
 }
 ```
 
-### throws(Never) -- non-throwing async
+### throws(Never) - non-throwing async
 
 ```swift
 // Explicitly non-throwing async function
@@ -466,10 +466,10 @@ struct AppConfig {
 
 1. **Prefer async/await over completion handlers** for new code.
 2. **Use `async let` for parallel work** when you have a fixed number of independent operations.
-3. **Always handle cancellation** -- check `Task.isCancelled` or call `try Task.checkCancellation()` in long-running work.
-4. **Use checked continuations during development** -- switch to unsafe only after testing.
-5. **Never resume a continuation more than once** -- this is a programming error.
-6. **Remember that each `await` is a suspension point** -- state may change across an `await`.
+3. **Always handle cancellation** - check `Task.isCancelled` or call `try Task.checkCancellation()` in long-running work.
+4. **Use checked continuations during development** - switch to unsafe only after testing.
+5. **Never resume a continuation more than once** - this is a programming error.
+6. **Remember that each `await` is a suspension point** - state may change across an `await`.
 
 ---
 

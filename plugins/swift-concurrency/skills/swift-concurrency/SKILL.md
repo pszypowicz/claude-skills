@@ -12,7 +12,7 @@ Before proposing a fix:
 2. Capture the exact diagnostic and offending symbol.
 3. Determine the isolation boundary: `@MainActor`, custom actor, actor instance isolation, or `nonisolated`.
 4. Confirm whether the code is UI-bound or intended to run off the main actor.
-5. Check if `@Observable` is in play — it changes how isolation inference works on the type.
+5. Check if `@Observable` is in play - it changes how isolation inference works on the type.
 
 Project settings that change concurrency behavior:
 
@@ -31,7 +31,7 @@ Guardrails:
 - Prefer structured concurrency over unstructured tasks. Use `Task.detached` only with a clear reason.
 - If recommending `@preconcurrency`, `@unchecked Sendable`, or `nonisolated(unsafe)`, require a documented safety invariant and a follow-up removal plan.
 - Optimize for the smallest safe change. Do not refactor unrelated architecture during migration.
-- When `@Observable` is involved, understand that it does NOT automatically imply `@MainActor` isolation — the developer must explicitly opt in. Do not conflate the two.
+- When `@Observable` is involved, understand that it does NOT automatically imply `@MainActor` isolation - the developer must explicitly opt in. Do not conflate the two.
 
 ## Quick Fix Mode
 
@@ -81,7 +81,7 @@ Prefer changes that preserve behavior while satisfying data-race safety:
 
 ## @Observable + @MainActor Quick Guide
 
-This is one of the most common pain points in modern SwiftUI apps. The `@Observable` macro does NOT infer `@MainActor` — you must explicitly add it when the class drives UI.
+This is one of the most common pain points in modern SwiftUI apps. The `@Observable` macro does NOT infer `@MainActor` - you must explicitly add it when the class drives UI.
 
 ### The Core Pattern
 
@@ -158,10 +158,10 @@ struct EditView: View {
 ### Common Mistakes
 
 ```swift
-// ❌ Missing @MainActor — mutations from async contexts may happen off main thread
+// ❌ Missing @MainActor - mutations from async contexts may happen off main thread
 @Observable
 final class ViewModel {
-    var items: [Item] = []  // SwiftUI reads this — must be main-actor-isolated
+    var items: [Item] = []  // SwiftUI reads this - must be main-actor-isolated
 }
 
 // ❌ Using old ObservableObject patterns with @Observable
@@ -184,7 +184,7 @@ For the full guide, see `references/observable.md`.
 |---|---|---|
 | Single async operation | `async/await` | Default choice for sequential async work |
 | Fixed parallel operations | `async let` | Known count at compile time; auto-cancelled on throw |
-| Dynamic parallel operations | `withTaskGroup` | Unknown count; structured — cancels children on scope exit |
+| Dynamic parallel operations | `withTaskGroup` | Unknown count; structured - cancels children on scope exit |
 | Sync → async bridge | `Task { }` | Inherits actor context; use `Task.detached` only with documented reason |
 | Shared mutable state | `actor` | Prefer over locks/queues; keep isolated sections small |
 | UI-bound state | `@MainActor` | Only for truly UI-related code; justify isolation |
@@ -224,13 +224,13 @@ Key changes in Swift 6:
 
 Apply this cycle for each migration change:
 
-1. **Build** — Run `swift build` or Xcode build to surface new diagnostics
-2. **Fix** — Address one category of error at a time (e.g., all Sendable issues first)
-3. **Rebuild** — Confirm the fix compiles cleanly before moving on
-4. **Test** — Run the test suite to catch regressions (`swift test` or Cmd+U)
+1. **Build** - Run `swift build` or Xcode build to surface new diagnostics
+2. **Fix** - Address one category of error at a time (e.g., all Sendable issues first)
+3. **Rebuild** - Confirm the fix compiles cleanly before moving on
+4. **Test** - Run the test suite to catch regressions (`swift test` or Cmd+U)
 5. **Only proceed** to the next file/module when all diagnostics are resolved
 
-If a fix introduces new warnings, resolve them before continuing. Never batch multiple unrelated fixes — keep commits small and reviewable.
+If a fix introduces new warnings, resolve them before continuing. Never batch multiple unrelated fixes - keep commits small and reviewable.
 
 For detailed migration steps, see `references/migration.md`.
 
@@ -239,26 +239,26 @@ For detailed migration steps, see `references/migration.md`.
 Open the smallest reference that matches the question:
 
 - Foundations
-  - `references/async-await-basics.md` — async/await syntax, execution order, async let, URLSession patterns
-  - `references/tasks.md` — Task lifecycle, cancellation, priorities, task groups, structured vs unstructured
-  - `references/actors.md` — Actor isolation, @MainActor, global actors, reentrancy, custom executors, Mutex
-  - `references/sendable.md` — Sendable conformance, value/reference types, @unchecked, region isolation
-  - `references/threading.md` — Execution model, suspension points, Swift 6.2 isolation behavior
+  - `references/async-await-basics.md` - async/await syntax, execution order, async let, URLSession patterns
+  - `references/tasks.md` - Task lifecycle, cancellation, priorities, task groups, structured vs unstructured
+  - `references/actors.md` - Actor isolation, @MainActor, global actors, reentrancy, custom executors, Mutex
+  - `references/sendable.md` - Sendable conformance, value/reference types, @unchecked, region isolation
+  - `references/threading.md` - Execution model, suspension points, Swift 6.2 isolation behavior
 - Observation
-  - `references/observable.md` — @Observable + @MainActor patterns, SwiftUI integration, async access, migration from ObservableObject
+  - `references/observable.md` - @Observable + @MainActor patterns, SwiftUI integration, async access, migration from ObservableObject
 - Streams
-  - `references/async-sequences.md` — AsyncSequence, AsyncStream, when to use vs regular async methods
-  - `references/async-algorithms.md` — Debounce, throttle, merge, combineLatest, channels, timers
+  - `references/async-sequences.md` - AsyncSequence, AsyncStream, when to use vs regular async methods
+  - `references/async-algorithms.md` - Debounce, throttle, merge, combineLatest, channels, timers
 - Applied topics
-  - `references/testing.md` — Swift Testing first, XCTest fallback, leak checks
-  - `references/performance.md` — Profiling with Instruments, reducing suspension points, execution strategies
-  - `references/memory-management.md` — Retain cycles in tasks, memory safety patterns
-  - `references/core-data.md` — NSManagedObject sendability, custom executors, isolation conflicts
+  - `references/testing.md` - Swift Testing first, XCTest fallback, leak checks
+  - `references/performance.md` - Profiling with Instruments, reducing suspension points, execution strategies
+  - `references/memory-management.md` - Retain cycles in tasks, memory safety patterns
+  - `references/core-data.md` - NSManagedObject sendability, custom executors, isolation conflicts
 - Migration and tooling
-  - `references/migration.md` — Swift 6 migration strategy, closure-to-async conversion, @preconcurrency, FRP migration
-  - `references/linting.md` — Concurrency-focused lint rules and SwiftLint `async_without_await`
+  - `references/migration.md` - Swift 6 migration strategy, closure-to-async conversion, @preconcurrency, FRP migration
+  - `references/linting.md` - Concurrency-focused lint rules and SwiftLint `async_without_await`
 - Glossary
-  - `references/glossary.md` — Quick definitions of core concurrency terms
+  - `references/glossary.md` - Quick definitions of core concurrency terms
 
 ## Verification Checklist
 

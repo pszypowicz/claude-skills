@@ -9,9 +9,9 @@ Add this section to your `~/.claude/CLAUDE.md` (or project-level CLAUDE.md) to c
 
 ### Custom Fields
 
-- `Custom.Reviewer1` — Primary reviewer (identity field)
-- `Custom.Reviewer2` — Secondary reviewer (identity field)
-- `Custom.Blocked` — Blocked status (`"Yes"` / `"No"`)
+- `Custom.Reviewer1` - Primary reviewer (identity field)
+- `Custom.Reviewer2` - Secondary reviewer (identity field)
+- `Custom.Blocked` - Blocked status (`"Yes"` / `"No"`)
 
 ### Work Item Types
 

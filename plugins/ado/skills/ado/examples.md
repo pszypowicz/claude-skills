@@ -1,4 +1,4 @@
-# ADO Skill — Example Outputs
+# ADO Skill - Example Outputs
 
 ## az repos pr list -o table
 
@@ -144,7 +144,7 @@ Stages/Jobs:
 }
 ```
 
-Reviewer field values are identity objects — extract `uniqueName` for email, `displayName` for display, `id` for GUID.
+Reviewer field values are identity objects - extract `uniqueName` for email, `displayName` for display, `id` for GUID.
 
 To extract parent ID from relations: parse the URL tail (last segment after `/`).
 

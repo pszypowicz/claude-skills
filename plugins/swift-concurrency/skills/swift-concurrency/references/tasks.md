@@ -34,7 +34,7 @@ Created -> Running -> Suspended -> Running -> ... -> Completed
                                                   -> Cancelled (cooperative)
 ```
 
-Tasks are **cooperatively cancelled** -- cancelling a task sets a flag, but the task must check for cancellation and respond.
+Tasks are **cooperatively cancelled** - cancelling a task sets a flag, but the task must check for cancellation and respond.
 
 ---
 
@@ -515,7 +515,7 @@ func poll() async throws {
 
 ### Task.yield
 
-Gives up the current CPU time slice so other tasks can run. Does not wait -- returns immediately if no other tasks need the CPU.
+Gives up the current CPU time slice so other tasks can run. Does not wait - returns immediately if no other tasks need the CPU.
 
 ```swift
 func processLargeArray(_ items: [Item]) async {

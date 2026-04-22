@@ -12,9 +12,9 @@ Xcode includes a dedicated Swift Concurrency instrument template for profiling a
 
 The instrument provides several tracks:
 
-- **Tasks** — shows task creation, suspension, and resumption over time
-- **Actors** — shows when actors are executing work and when tasks are queued waiting for access
-- **Task Continuations** — visualizes the suspension-to-resumption flow
+- **Tasks** - shows task creation, suspension, and resumption over time
+- **Actors** - shows when actors are executing work and when tasks are queued waiting for access
+- **Task Continuations** - visualizes the suspension-to-resumption flow
 
 ### Reading Actor Hops
 
@@ -38,7 +38,7 @@ await customActor.finalize()// hop to customActor again
 
 ### Task Scheduling
 
-The instrument shows when tasks are **runnable** (ready to execute) vs **running** (actually on a thread). Large gaps between runnable and running indicate thread pool contention — too many tasks competing for the limited number of cooperative threads.
+The instrument shows when tasks are **runnable** (ready to execute) vs **running** (actually on a thread). Large gaps between runnable and running indicate thread pool contention - too many tasks competing for the limited number of cooperative threads.
 
 ---
 
@@ -177,7 +177,7 @@ actor DataProcessor {
 **Guidelines:**
 - Use `nonisolated` (default) for lightweight work that benefits from staying on the caller's executor
 - Use `@concurrent nonisolated` for CPU-heavy work that should run on the thread pool
-- Avoid `@concurrent` for trivial getters — the hop overhead outweighs any benefit
+- Avoid `@concurrent` for trivial getters - the hop overhead outweighs any benefit
 
 ---
 
@@ -275,6 +275,6 @@ let data = await measure("Fetch + Parse") {
 - **Warm up** before measuring (first run may involve caches, JIT, etc.)
 - **Run multiple iterations** and use median, not mean (outliers from scheduling jitter)
 - **Profile on device**, not just Simulator (thread pool sizes differ)
-- **Control for background work** — close other apps, use airplane mode for network tests
+- **Control for background work** - close other apps, use airplane mode for network tests
 - **Compare sequential vs parallel** at different data sizes to find the crossover point
-- **Use release builds** — debug builds have dramatically different performance characteristics due to runtime checks and lack of optimization
+- **Use release builds** - debug builds have dramatically different performance characteristics due to runtime checks and lack of optimization

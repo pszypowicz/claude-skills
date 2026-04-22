@@ -37,20 +37,20 @@ Jump to:
 
 ## Why Migrate to Swift 6
 
-Swift 6 enforces **complete data-race safety at compile time**. In Swift 5, data races are runtime bugs — silent until they crash. In Swift 6, they are compile errors.
+Swift 6 enforces **complete data-race safety at compile time**. In Swift 5, data races are runtime bugs - silent until they crash. In Swift 6, they are compile errors.
 
 Benefits:
 
-- **Eliminates a class of bugs** — data races cannot ship.
-- **Compiler-guided migration** — diagnostics tell you exactly what is wrong.
-- **Incremental adoption** — enable strict checking as warnings first, then errors.
-- **Future-proof** — Swift 6 mode is the long-term direction; Swift 5 mode will eventually be deprecated.
+- **Eliminates a class of bugs** - data races cannot ship.
+- **Compiler-guided migration** - diagnostics tell you exactly what is wrong.
+- **Incremental adoption** - enable strict checking as warnings first, then errors.
+- **Future-proof** - Swift 6 mode is the long-term direction; Swift 5 mode will eventually be deprecated.
 
 Costs:
 
-- **Initial migration effort** — existing code will produce many new diagnostics.
-- **Dependency readiness** — some libraries may not be Sendable-annotated yet.
-- **Learning curve** — the isolation model requires a mindset shift from GCD.
+- **Initial migration effort** - existing code will produce many new diagnostics.
+- **Dependency readiness** - some libraries may not be Sendable-annotated yet.
+- **Learning curve** - the isolation model requires a mindset shift from GCD.
 
 The question is not whether to migrate, but when and how fast.
 
@@ -105,11 +105,11 @@ This happens because concurrency safety is **transitive**. Making one type Senda
 
 ### How to avoid it
 
-1. **Migrate leaf modules first.** Start with modules that have no internal dependencies — utilities, models, networking layers.
+1. **Migrate leaf modules first.** Start with modules that have no internal dependencies - utilities, models, networking layers.
 2. **Use `@preconcurrency` as a boundary.** When a dependency is not yet migrated, mark the import `@preconcurrency` to suppress diagnostics at that boundary.
 3. **Fix one category at a time.** Do all Sendable conformances first, then all actor isolation issues, then all async boundary issues.
 4. **Set a time box.** If a fix cascades into more than 2-3 files, stop and reassess the approach.
-5. **Accept temporary escape hatches.** `@unchecked Sendable`, `nonisolated(unsafe)`, and `@preconcurrency` are legitimate migration tools — document them and plan follow-up removal.
+5. **Accept temporary escape hatches.** `@unchecked Sendable`, `nonisolated(unsafe)`, and `@preconcurrency` are legitimate migration tools - document them and plan follow-up removal.
 
 ---
 
@@ -130,7 +130,7 @@ Mix Sendable fixes with actor isolation changes and you will never be able to bi
 
 ### 3. Build after every change
 
-Do not batch fixes. The compiler's diagnostics change as you fix issues — a fix in file A may resolve or create diagnostics in file B.
+Do not batch fixes. The compiler's diagnostics change as you fix issues - a fix in file A may resolve or create diagnostics in file B.
 
 ### 4. Test after every category
 
@@ -204,13 +204,13 @@ For app targets (not libraries), set `MainActor` as default isolation:
 
 This makes all unannotated code `@MainActor`, reducing the number of explicit annotations needed.
 
-**Do not set default isolation for library targets** — it forces isolation on consumers.
+**Do not set default isolation for library targets** - it forces isolation on consumers.
 
 ### Step 5: Enable strict concurrency checking
 
 Progress through three levels:
 
-**Level 1: Targeted** — checks only code that uses concurrency features.
+**Level 1: Targeted** - checks only code that uses concurrency features.
 
 ```swift
 // SwiftPM
@@ -219,7 +219,7 @@ Progress through three levels:
 // SWIFT_STRICT_CONCURRENCY = targeted
 ```
 
-**Level 2: Complete** — checks all code, but as warnings.
+**Level 2: Complete** - checks all code, but as warnings.
 
 ```swift
 // SwiftPM
@@ -228,7 +228,7 @@ Progress through three levels:
 // SWIFT_STRICT_CONCURRENCY = complete
 ```
 
-**Level 3: Swift 6 mode** — all concurrency warnings become errors.
+**Level 3: Swift 6 mode** - all concurrency warnings become errors.
 
 ```swift
 // SwiftPM
@@ -315,9 +315,9 @@ All concurrency warnings become errors. You now have compile-time data-race safe
 
 Xcode provides a migration assistant:
 
-1. **Edit > Convert > To Current Swift Syntax** — handles some concurrency annotations.
-2. **Build with strict concurrency** — surfaces all diagnostics in the Issue Navigator.
-3. **Fix-it suggestions** — available for many concurrency diagnostics (but verify them manually).
+1. **Edit > Convert > To Current Swift Syntax** - handles some concurrency annotations.
+2. **Build with strict concurrency** - surfaces all diagnostics in the Issue Navigator.
+3. **Fix-it suggestions** - available for many concurrency diagnostics (but verify them manually).
 
 Review every fix-it. Xcode may suggest adding `@Sendable` where actor isolation is the better fix, or suggest `nonisolated` where `@MainActor` is correct.
 
@@ -326,7 +326,7 @@ Review every fix-it. Xcode may suggest adding `@Sendable` where actor isolation 
 For SwiftPM packages, use the migration command:
 
 ```bash
-# Dry run — shows what would change
+# Dry run - shows what would change
 swift package migrate --targets MyTarget --to-language-mode 6 --dry-run
 
 # Apply changes
@@ -338,7 +338,7 @@ This command:
 - Applies compiler-suggested fix-its automatically.
 - Reports diagnostics that require manual intervention.
 
-**Always review the diff after running `swift package migrate`.** The automated fixes are not always the best solution — they tend toward escape hatches like `@preconcurrency` rather than proper isolation.
+**Always review the diff after running `swift package migrate`.** The automated fixes are not always the best solution - they tend toward escape hatches like `@preconcurrency` rather than proper isolation.
 
 ---
 
@@ -383,7 +383,7 @@ func geocode(address: String) async throws -> CLPlacemark {
 
 - **Resume exactly once.** Missing a resume leaks the task forever. Resuming twice crashes.
 - **Handle all paths.** Every code path in the callback must call `continuation.resume`.
-- **Use `withCheckedContinuation` during development** — it crashes on misuse. Switch to `withUnsafeContinuation` only if profiling shows overhead.
+- **Use `withCheckedContinuation` during development** - it crashes on misuse. Switch to `withUnsafeContinuation` only if profiling shows overhead.
 
 ### Delegate pattern to AsyncStream
 
@@ -435,7 +435,7 @@ Suppresses Sendable warnings for types from the imported module:
 @preconcurrency import SomeLibrary
 
 // SomeLibrary.SomeType used across isolation boundaries
-// without Sendable warnings — until SomeLibrary adds Sendable conformances
+// without Sendable warnings - until SomeLibrary adds Sendable conformances
 ```
 
 When the library adds proper Sendable conformances, the compiler warns that `@preconcurrency` is unnecessary. Remove it then.
@@ -469,7 +469,7 @@ class Handler: @preconcurrency LegacyDelegate {
 ### When NOT to use @preconcurrency
 
 - As a blanket silencer for all concurrency warnings in your own code.
-- On your own protocols — fix the protocol instead.
+- On your own protocols - fix the protocol instead.
 - When a proper Sendable conformance or actor isolation is straightforward.
 
 ---
@@ -478,7 +478,7 @@ class Handler: @preconcurrency LegacyDelegate {
 
 ### The Observation alternative
 
-For the most common Combine use case — observable state driving SwiftUI — the Observation framework is the replacement:
+For the most common Combine use case - observable state driving SwiftUI - the Observation framework is the replacement:
 
 ```swift
 // Before: Combine
@@ -596,9 +596,9 @@ publisher
 
 Not all Combine usage needs migration:
 
-- **Framework APIs that return publishers** (e.g., `NotificationCenter.Publisher`) — keep using them if they work; async alternatives will come.
-- **Complex reactive pipelines** with many operators — migrate only when you have test coverage.
-- **Shared publishers with multiple subscribers** — `AsyncStream` is single-consumer; you need `AsyncBroadcastSequence` (Async Algorithms) or a custom solution.
+- **Framework APIs that return publishers** (e.g., `NotificationCenter.Publisher`) - keep using them if they work; async alternatives will come.
+- **Complex reactive pipelines** with many operators - migrate only when you have test coverage.
+- **Shared publishers with multiple subscribers** - `AsyncStream` is single-consumer; you need `AsyncBroadcastSequence` (Async Algorithms) or a custom solution.
 
 ---
 
@@ -760,10 +760,10 @@ struct DataDidChange: MainActorMessage {
 // Post from anywhere
 MessageCenter.default.post(DataDidChange(updatedIDs: ["1", "2"]))
 
-// Observe — guaranteed @MainActor delivery
+// Observe - guaranteed @MainActor delivery
 func observeChanges() {
     MessageCenter.default.addObserver(of: DataDidChange.self) { message in
-        // Runs on @MainActor — safe to update UI
+        // Runs on @MainActor - safe to update UI
         refreshUI(for: message.updatedIDs)
     }
 }
@@ -825,7 +825,7 @@ for await notification in NotificationCenter.default.notifications(named: .NSMan
 @MainActor
 func setupUI() {
     Task {
-        label.text = "Hello"  // This is already on @MainActor — no Task needed
+        label.text = "Hello"  // This is already on @MainActor - no Task needed
     }
 }
 
@@ -853,7 +853,7 @@ actor MyManager {
 ### Semaphores in async contexts
 
 ```swift
-// ❌ Blocks a cooperative thread — can deadlock
+// ❌ Blocks a cooperative thread - can deadlock
 func fetchSync() -> Data {
     let semaphore = DispatchSemaphore(value: 0)
     var result: Data?
@@ -884,7 +884,7 @@ class ViewModel {
 ```swift
 // ❌ Using Task.detached to avoid sending values across isolation
 Task.detached {
-    // Now nothing is inherited — but you lost actor context and priority
+    // Now nothing is inherited - but you lost actor context and priority
     await self.doWork()
 }
 
@@ -919,7 +919,7 @@ Task {
 @MainActor
 class MyController: UIViewController, @preconcurrency UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        // Safe — UIKit calls this on main thread
+        // Safe - UIKit calls this on main thread
     }
 }
 ```
@@ -987,7 +987,7 @@ These are mistakes that AI assistants (including this one) frequently make when 
 
 ### 1. Suggesting @MainActor for everything
 
-Not all code is UI-bound. Adding `@MainActor` to a data processing layer or networking module is wrong — it forces all work onto the main thread.
+Not all code is UI-bound. Adding `@MainActor` to a data processing layer or networking module is wrong - it forces all work onto the main thread.
 
 **Correct approach**: Only use `@MainActor` for code that genuinely owns or updates UI state.
 
@@ -995,7 +995,7 @@ Not all code is UI-bound. Adding `@MainActor` to a data processing layer or netw
 
 `@unchecked Sendable` silences the compiler but does not fix the data race. It should only be used when you can prove thread safety through other means (e.g., internal locking, immutability after initialization).
 
-**Correct approach**: Fix the underlying issue — make properties immutable, use an actor, or restructure the type.
+**Correct approach**: Fix the underlying issue - make properties immutable, use an actor, or restructure the type.
 
 ### 3. Adding nonisolated to silence isolation errors
 

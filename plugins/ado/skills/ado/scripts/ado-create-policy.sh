@@ -91,7 +91,7 @@ resolve_reviewer() {
 
   [[ -z "${ADO_AUTH_HEADER:-}" ]] && ado_resolve_auth
 
-  # Try Graph users API — match by email or display name, return descriptor
+  # Try Graph users API - match by email or display name, return descriptor
   local users_result
   users_result=$(curl -s -S \
     -H "$ADO_AUTH_HEADER" -H "Content-Type: application/json" \
@@ -150,7 +150,7 @@ except Exception:
     fi
   fi
 
-  # Teams API fallback — team id is already a GUID
+  # Teams API fallback - team id is already a GUID
   local teams_result
   teams_result=$(curl -s -S \
     -H "$ADO_AUTH_HEADER" -H "Content-Type: application/json" \
@@ -179,7 +179,7 @@ sys.exit(1)
     fi
   fi
 
-  # Nothing found — list available users and teams
+  # Nothing found - list available users and teams
   python3 -c "
 import sys, json
 

@@ -94,7 +94,7 @@ Use inline suppression sparingly. Every suppression should include a rationale s
 ### Inline suppression (single line)
 
 ```swift
-func fetchData() async -> Data { // swiftlint:disable:this async_without_await — protocol requirement
+func fetchData() async -> Data { // swiftlint:disable:this async_without_await - protocol requirement
     Data()
 }
 ```
@@ -102,7 +102,7 @@ func fetchData() async -> Data { // swiftlint:disable:this async_without_await �
 ### Next-line suppression
 
 ```swift
-// swiftlint:disable:next async_without_await — override of async superclass method
+// swiftlint:disable:next async_without_await - override of async superclass method
 override func load() async -> String {
     "cached"
 }

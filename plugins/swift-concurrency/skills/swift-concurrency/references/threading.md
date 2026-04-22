@@ -49,7 +49,7 @@ A **task** is a unit of asynchronous work. A **thread** is an OS-level execution
 
 Key distinctions:
 
-- **Tasks are cheap** — you can create thousands. Threads are expensive — the pool is fixed.
+- **Tasks are cheap** - you can create thousands. Threads are expensive - the pool is fixed.
 - **Tasks suspend** at `await` points. The thread is returned to the pool, not blocked.
 - **Tasks do not own threads**. A task may resume on a different thread than it suspended on.
 - **The main actor has a dedicated thread** (the main thread). All other actors share the cooperative pool.
@@ -65,7 +65,7 @@ Task {
 ### What the runtime guarantees
 
 - At most one thread per CPU core in the cooperative pool (excluding the main thread).
-- Tasks on the same actor execute serially — never concurrently.
+- Tasks on the same actor execute serially - never concurrently.
 - Suspension points are the only places where another task can interleave on the same actor.
 
 ### What the runtime does NOT guarantee
@@ -103,10 +103,10 @@ Things that block a cooperative thread (never do these in async contexts):
 
 Use instead:
 
-- `await Task.sleep(for:)` — suspends the task without blocking the thread
-- `actor` — serializes access without blocking
-- `Mutex` (Swift 6.0+) — synchronous low-level lock that is safe for brief critical sections but must not be held across `await`
-- `AsyncStream` — for producer/consumer patterns
+- `await Task.sleep(for:)` - suspends the task without blocking the thread
+- `actor` - serializes access without blocking
+- `Mutex` (Swift 6.0+) - synchronous low-level lock that is safe for brief critical sections but must not be held across `await`
+- `AsyncStream` - for producer/consumer patterns
 
 ---
 
@@ -148,7 +148,7 @@ final class ViewModel {
 
     @concurrent
     private static func fetchAndProcess() async -> [Item] {
-        // Runs on cooperative pool — no need to specify a queue
+        // Runs on cooperative pool - no need to specify a queue
         return try await APIClient.fetch()
     }
 }
@@ -158,7 +158,7 @@ final class ViewModel {
 
 ## Suspension Points and Actor Reentrancy
 
-Every `await` is a **suspension point** — the task may pause and resume later. Between suspension and resumption, other tasks can run on the same actor. This is actor reentrancy.
+Every `await` is a **suspension point** - the task may pause and resume later. Between suspension and resumption, other tasks can run on the same actor. This is actor reentrancy.
 
 ```swift
 actor BankAccount {
@@ -166,7 +166,7 @@ actor BankAccount {
 
     func withdraw(_ amount: Int) async -> Bool {
         guard balance >= amount else { return false }  // Check
-        // ⚠️ SUSPENSION POINT — another task could change balance here
+        // ⚠️ SUSPENSION POINT - another task could change balance here
         await authorizeTransaction()
         // balance may no longer be >= amount!
         balance -= amount  // ❌ Potential negative balance
@@ -222,7 +222,7 @@ actor BankAccount {
 actor Counter {
     var count = 0
 
-    // No suspension point — no reentrancy risk
+    // No suspension point - no reentrancy risk
     func increment() {
         count += 1
     }
@@ -302,7 +302,7 @@ nonisolated func format(_ text: String) async -> String {
 @MainActor
 func updateUI() async {
     let formatted = await format("hello")
-    // ↑ No hop — format() runs on the main actor
+    // ↑ No hop - format() runs on the main actor
     // No Sendable requirement for text or return value
     label.text = formatted
 }
@@ -332,7 +332,7 @@ When you actually need a function to run on the cooperative pool (CPU-heavy work
 // Explicitly opts into running on the cooperative pool
 @concurrent
 func processImage(_ data: Data) async -> UIImage {
-    // Heavy computation — should not block the main actor
+    // Heavy computation - should not block the main actor
     return UIImage(data: data)!
 }
 
@@ -372,8 +372,8 @@ nonisolated(nonsending) func validate(_ input: String) async -> Bool {
 With `NonisolatedNonsendingByDefault`, many Sendable errors disappear because values no longer cross isolation boundaries:
 
 ```swift
-// Pre-6.2: Error — NonSendableType crosses isolation boundary
-// Post-6.2 with NonisolatedNonsendingByDefault: OK — stays in caller's isolation
+// Pre-6.2: Error - NonSendableType crosses isolation boundary
+// Post-6.2 with NonisolatedNonsendingByDefault: OK - stays in caller's isolation
 nonisolated func process(_ value: NonSendableType) async -> Result {
     return value.transform()
 }
@@ -391,7 +391,7 @@ Most app code is UI-related. With `@MainActor` as the default:
 
 - All functions, types, and properties are main-actor-isolated by default.
 - You only annotate the exceptions (background work) with `nonisolated` or `@concurrent`.
-- Fewer annotations overall — the common case requires no annotation.
+- Fewer annotations overall - the common case requires no annotation.
 - Matches what most developers expect: code runs on the main thread unless told otherwise.
 
 ### Configuring in SwiftPM
@@ -432,7 +432,7 @@ nonisolated func pureComputation() -> Int { ... }
 @concurrent
 func heavyWork() async -> Data { ... }
 
-// Actors are unaffected — they define their own isolation
+// Actors are unaffected - they define their own isolation
 actor DataStore { ... }
 ```
 
@@ -455,7 +455,7 @@ Together, they mean:
 
 ### Thread.current is unavailable in Swift 6
 
-In Swift 6 strict concurrency mode, `Thread.current` is unavailable from async contexts. This is intentional — tasks do not own threads, so asking "which thread am I on?" is the wrong question.
+In Swift 6 strict concurrency mode, `Thread.current` is unavailable from async contexts. This is intentional - tasks do not own threads, so asking "which thread am I on?" is the wrong question.
 
 ```swift
 // ❌ Unavailable in async context under Swift 6
@@ -501,10 +501,10 @@ dispatchPrecondition(condition: .onQueue(.main))
 
 If the main actor is blocked, common causes:
 
-1. **Long synchronous work on @MainActor** — move to `@concurrent` async function.
-2. **Blocking call in async context** — replace `DispatchSemaphore.wait()` with `await`.
-3. **Actor deadlock** — an actor waiting on itself through a re-entrant call chain.
-4. **Too many tasks on main actor** — check if work is unnecessarily `@MainActor`-isolated.
+1. **Long synchronous work on @MainActor** - move to `@concurrent` async function.
+2. **Blocking call in async context** - replace `DispatchSemaphore.wait()` with `await`.
+3. **Actor deadlock** - an actor waiting on itself through a re-entrant call chain.
+4. **Too many tasks on main actor** - check if work is unnecessarily `@MainActor`-isolated.
 
 ---
 
@@ -531,7 +531,7 @@ No. `Task { }` inherits the enclosing isolation:
 @MainActor
 func setup() {
     Task {
-        // This runs on the main actor — same isolation as setup()
+        // This runs on the main actor - same isolation as setup()
         await loadData()
     }
 }
@@ -548,7 +548,7 @@ func setup() {
 
 ### "nonisolated means it runs on a background thread"
 
-Not necessarily. `nonisolated` means the function has no specific isolation requirement. In Swift 6.2+ with `NonisolatedNonsendingByDefault`, nonisolated async functions inherit the caller's isolation — they may run on the main actor if called from `@MainActor` code.
+Not necessarily. `nonisolated` means the function has no specific isolation requirement. In Swift 6.2+ with `NonisolatedNonsendingByDefault`, nonisolated async functions inherit the caller's isolation - they may run on the main actor if called from `@MainActor` code.
 
 ### "await always means a thread hop"
 

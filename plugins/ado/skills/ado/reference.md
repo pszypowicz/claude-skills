@@ -1,6 +1,6 @@
-# ADO Skill — Detailed Reference
+# ADO Skill - Detailed Reference
 
-## az repos pr — Full Flag Reference
+## az repos pr - Full Flag Reference
 
 ### pr create
 
@@ -64,7 +64,7 @@ az pipelines list --query "[?name=='my-pipeline'].id | [0]" -o tsv
 az repos pr show --id 42 --query "reviewers[?vote==\`0\`].displayName" -o json
 ```
 
-## REST API — Environments, Checks & Approvals
+## REST API - Environments, Checks & Approvals
 
 ### Base Setup
 
@@ -128,7 +128,7 @@ curl -s -X PATCH -H "$AUTH" -H "Content-Type: application/json" \
   "$BASE/pipelines/checks/configurations/<CHECK_ID>?api-version=7.1-preview.1"
 ```
 
-## REST API — Work Item Comments
+## REST API - Work Item Comments
 
 ### Base Endpoint
 
@@ -180,15 +180,15 @@ Returns HTTP 204 (no body).
 
 ### CLI Shorthand
 
-`az boards work-item update --id <ID> --discussion "text"` — append-only, no comment ID returned. Use REST for full CRUD.
+`az boards work-item update --id <ID> --discussion "text"` - append-only, no comment ID returned. Use REST for full CRUD.
 
-## REST API — PR Comment Threads
+## REST API - PR Comment Threads
 
 ### Base Endpoint
 
 `{org}/{project}/_apis/git/repositories/{repo}/pullRequests/{prId}/threads`
 
-Repo name works directly — no GUID resolution needed. API version: `7.1` (GA, not preview).
+Repo name works directly - no GUID resolution needed. API version: `7.1` (GA, not preview).
 
 ### Thread Operations
 
@@ -198,7 +198,7 @@ Repo name works directly — no GUID resolution needed. API version: `7.1` (GA, 
 GET .../threads?api-version=7.1
 ```
 
-No server-side status filtering — must filter client-side.
+No server-side status filtering - must filter client-side.
 
 **Create thread:**
 
@@ -281,7 +281,7 @@ data "azurerm_resource_group" "example" {
 
 - Max 500 comments per thread
 
-## Work Items — az boards Reference
+## Work Items - az boards Reference
 
 ### --project flag support
 
@@ -410,9 +410,9 @@ curl -s -X PATCH -H "$AUTH" -H "Content-Type: application/json-patch+json" \
 
 The `ado-create-policy.sh` script resolves reviewer identities through this cascade:
 
-1. **Raw GUID** — 36-char hex-and-dash pattern, used as-is
-2. **Email/display name** — Queries VSSPS Graph Users API, matches email or display name, converts descriptor to storage key GUID via Storage Keys API
-3. **Team name** — Queries Teams API, matches team name, returns team ID (already a GUID)
+1. **Raw GUID** - 36-char hex-and-dash pattern, used as-is
+2. **Email/display name** - Queries VSSPS Graph Users API, matches email or display name, converts descriptor to storage key GUID via Storage Keys API
+3. **Team name** - Queries Teams API, matches team name, returns team ID (already a GUID)
 
 VSSPS base URL: `https://vssps.dev.azure.com/<org_name>`
 

@@ -37,7 +37,7 @@ ado_resolve_auth() {
 }
 
 # ado_api METHOD PATH [BODY] [API_VERSION]
-# PATH is relative (e.g. "git/repositories") — base URL is built automatically.
+# PATH is relative (e.g. "git/repositories") - base URL is built automatically.
 ado_api() {
   local method="$1" path="$2" body="${3:-}" api_version="${4:-7.1}"
 

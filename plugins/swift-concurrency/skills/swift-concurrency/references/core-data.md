@@ -75,7 +75,7 @@ This is the recommended pattern. The DTO crosses actor boundaries safely.
 `NSManagedObjectContext` provides async-friendly `perform` methods:
 
 ```swift
-// Async perform — suspends the calling task, runs on the context's queue
+// Async perform - suspends the calling task, runs on the context's queue
 let users = try await context.perform {
     let request = User.fetchRequest()
     return try context.fetch(request)
@@ -90,8 +90,8 @@ try await context.perform(schedule: .enqueued) {
 ```
 
 `schedule` options:
-- `.immediate` — executes immediately if already on the correct queue (like `performAndWait`), otherwise enqueues
-- `.enqueued` — always enqueues (like `perform`)
+- `.immediate` - executes immediately if already on the correct queue (like `performAndWait`), otherwise enqueues
+- `.enqueued` - always enqueues (like `perform`)
 
 ### Important: Return Values Must Be Sendable
 
@@ -170,7 +170,7 @@ actor UserDAO {
 
 ### Double Serialization Consideration
 
-Note that both the actor and `context.perform` serialize access. This is intentional — the actor prevents interleaved async calls, and `perform` ensures the context's queue is used. If you find this adds unnecessary overhead, you can use a custom executor (see below).
+Note that both the actor and `context.perform` serialize access. This is intentional - the actor prevents interleaved async calls, and `perform` ensures the context's queue is used. If you find this adds unnecessary overhead, you can use a custom executor (see below).
 
 ---
 
@@ -191,7 +191,7 @@ actor CoreDataActor {
         self.context = container.newBackgroundContext()
     }
 
-    // No need for context.perform — the actor already runs on the context's queue
+    // No need for context.perform - the actor already runs on the context's queue
     func fetchUsers() throws -> [UserDTO] {
         let request = User.fetchRequest()
         return try context.fetch(request).map { $0.toDTO() }
@@ -315,7 +315,7 @@ The `@ModelActor` macro generates the actor with a custom executor tied to the `
 
 ### PersistentIdentifier as the Sendable Token
 
-In SwiftData, `PersistentIdentifier` serves the same role as `NSManagedObjectID` — it is `Sendable` and can be passed across isolation boundaries:
+In SwiftData, `PersistentIdentifier` serves the same role as `NSManagedObjectID` - it is `Sendable` and can be passed across isolation boundaries:
 
 ```swift
 @MainActor

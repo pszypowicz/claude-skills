@@ -1,7 +1,7 @@
 ---
 name: ado
 description: >-
-  Azure DevOps operations — PRs, pipelines, policies, builds, variable groups,
+  Azure DevOps operations - PRs, pipelines, policies, builds, variable groups,
   environments, feeds, branches, work items, comments. This skill should be used
   when the user asks to "create a PR", "list pipelines", "run a pipeline",
   "check build status", "debug failed pipeline", "create a policy",
@@ -38,7 +38,7 @@ Prefer the `az` CLI; fall back to `curl` + PAT for REST endpoints that `az` does
 
 All `az` commands use `--org "$ADO_ORG" -p "$ADO_PROJECT" --detect false`.
 
-**Exception:** These subcommands are org-scoped — they take `--org` but **not** `--project`:
+**Exception:** These subcommands are org-scoped - they take `--org` but **not** `--project`:
 
 - `az boards work-item show`, `update`, `relation add`
 - `az repos pr show`, `update`, `set-vote`
@@ -55,7 +55,7 @@ Only `az boards work-item create` and `az boards query` accept `--project`.
 # List PRs
 az repos pr list -r <repo> --status active --top N --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 
-# Show PR details (org-scoped — no --project)
+# Show PR details (org-scoped - no --project)
 az repos pr show --id <ID> --org "$ADO_ORG" --detect false
 
 # Show PR policy evaluations
@@ -131,7 +131,7 @@ All PR comment operations require curl with PAT auth (`az rest` does not work wi
 AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64)"
 THREADS="${ADO_ORG}/${ADO_PROJECT}/_apis/git/repositories/<repo>/pullRequests/<prId>/threads"
 
-# List active threads (script — handles filtering + formatting)
+# List active threads (script - handles filtering + formatting)
 ${CLAUDE_SKILL_DIR}/scripts/ado-pr-threads.sh --pr-id <ID> --repo <repo> --status active
 
 # List threads on a specific file
@@ -147,7 +147,7 @@ curl -s -H "$AUTH" -H "Content-Type: application/json" -X POST \
   "${THREADS}?api-version=7.1" \
   -d '{"comments":[{"content":"Should use a data source here.","commentType":1}],"status":"active","threadContext":{"filePath":"/src/main.tf","rightFileStart":{"line":42,"offset":1},"rightFileEnd":{"line":42,"offset":1}}}'
 
-# Code suggestion (uses ```suggestion block — ADO renders as applicable diff)
+# Code suggestion (uses ```suggestion block - ADO renders as applicable diff)
 curl -s -H "$AUTH" -H "Content-Type: application/json" -X POST \
   "${THREADS}?api-version=7.1" \
   -d '{"comments":[{"content":"Consider:\n\n```suggestion\ndata \"azurerm_resource_group\" \"example\" {\n  name = var.rg_name\n}\n```","commentType":1}],"status":"active","threadContext":{"filePath":"/src/main.tf","rightFileStart":{"line":42,"offset":1},"rightFileEnd":{"line":44,"offset":1}}}'
@@ -223,7 +223,7 @@ az repos policy update --id <id> --blocking true --enabled true --org "$ADO_ORG"
 az repos policy delete --id <id> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 ```
 
-Create policy (complex — use script for identity resolution):
+Create policy (complex - use script for identity resolution):
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/ado-create-policy.sh --repo <name> --type build --pipeline-id <id> [--branch main] [--display-name TEXT] [--blocking]
@@ -256,7 +256,7 @@ az boards work-item show --id <ID> --expand all --org "$ADO_ORG" --detect false 
 # Show specific fields only (NOTE: --expand and -f are mutually exclusive)
 az boards work-item show --id <ID> -f "System.Title,System.State,System.AssignedTo,<custom-field-1>,<custom-field-2>" --org "$ADO_ORG" --detect false -o json
 
-# Query work items (WIQL) — this command accepts --project
+# Query work items (WIQL) - this command accepts --project
 az boards query --wiql "SELECT [System.Id], [System.Title], [System.State] FROM workitems WHERE [System.AreaPath] UNDER '<AreaPath>' AND [System.State] = 'Active' AND [System.WorkItemType] = '<TaskType>'" --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 
 # List child work items of a parent
@@ -264,7 +264,7 @@ az boards query --wiql "SELECT [System.Id], [System.Title], [System.State], [Sys
 
 # Show work item with relations (to find parent/child links)
 az boards work-item show --id <ID> --expand relations --org "$ADO_ORG" --detect false -o json
-# Parse parent: jq '.relations[] | select(.attributes.name == "Parent") | .url' — extract ID from URL tail
+# Parse parent: jq '.relations[] | select(.attributes.name == "Parent") | .url' - extract ID from URL tail
 ```
 
 ### Create & Update
@@ -288,7 +288,7 @@ az boards work-item update --id <ID> \
   -f "<custom-field-1>=reviewer1@email.com" "<custom-field-2>=reviewer2@email.com" \
   --org "$ADO_ORG" --detect false
 
-# Quick append discussion comment (az CLI shorthand — no comment ID returned, no @mention support)
+# Quick append discussion comment (az CLI shorthand - no comment ID returned, no @mention support)
 az boards work-item update --id <ID> --discussion "Started work on this" \
   --org "$ADO_ORG" --detect false
 ```
@@ -343,7 +343,7 @@ az boards work-item relation add --id <CHILD_ID> --relation-type parent --target
 az boards work-item relation add --id <PARENT_ID> --relation-type child --target-id <CHILD_ID> \
   --org "$ADO_ORG" --detect false
 
-# Link work item to PR (from PR side — preferred)
+# Link work item to PR (from PR side - preferred)
 az repos pr work-item add --id <PR_ID> --work-items <WI_ID> \
   --org "$ADO_ORG" --detect false
 
@@ -564,7 +564,7 @@ az repos pr create -r my-repo -s feature/branch --title "Implement X" \
 az repos pr work-item add --id <PR_ID> --work-items <WI_ID> \
   --org "$ADO_ORG" --detect false
 
-# 7. Add reviewers to PR (use GUIDs from identity fields, not emails — PAT can't resolve emails)
+# 7. Add reviewers to PR (use GUIDs from identity fields, not emails - PAT can't resolve emails)
 az repos pr reviewer add --id <PR_ID> --reviewers <REVIEWER1_GUID> <REVIEWER2_GUID> --required true \
   --org "$ADO_ORG" --detect false
 ```
@@ -578,7 +578,7 @@ az devops team list --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false -o table
 # 2. Get members of a team
 az devops team list-member --team "<TeamName>" --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false -o table
 
-# 3. Add as PR reviewer (use member GUID from list-member output — email lookup fails with PAT auth)
+# 3. Add as PR reviewer (use member GUID from list-member output - email lookup fails with PAT auth)
 az repos pr reviewer add --id <PR_ID> --reviewers <MEMBER_GUID> \
   --org "$ADO_ORG" --detect false
 ```
@@ -611,7 +611,7 @@ At the start of each session that involves assigning work items or adding PR rev
 az ad signed-in-user show --query '{displayName: displayName, mail: mail, id: id}' -o json
 ```
 
-Use the returned email for `--assigned-to` and the GUID for reviewer operations. Do **not** persist this to memory — the user may switch accounts between sessions.
+Use the returned email for `--assigned-to` and the GUID for reviewer operations. Do **not** persist this to memory - the user may switch accounts between sessions.
 
 ## Instructions
 
@@ -630,12 +630,12 @@ When the user asks for an ADO operation:
 9. If an `az` command fails unexpectedly, fall back to raw curl
 10. When reading a work item or PR for context, also load comments/threads for full picture
 11. For PR review, start by listing active threads to see what needs attention
-12. Code suggestions use ` ```suggestion ` blocks — ADO renders them as applicable diffs
+12. Code suggestions use ` ```suggestion ` blocks - ADO renders them as applicable diffs
 
 ## Additional Resources
 
 For detailed reference material and real output examples, consult:
 
-- **`reference.md`** — Full az CLI flag tables, JMESPath query patterns, REST API details for environments/checks/approvals, work item comments, PR comment threads, work item field reference, identity resolution cascade, policy type GUIDs
-- **`examples.md`** — Real output samples for all major commands (PR list/show/policy, pipeline list/runs, run tree, work item JSON, query results, task logs, PR threads, work item comments, code suggestions)
-- **`examples/project-claude-ado.md`** — Template for project-specific ADO configuration (custom fields, work item types, area/iteration paths) to add to your CLAUDE.md
+- **`reference.md`** - Full az CLI flag tables, JMESPath query patterns, REST API details for environments/checks/approvals, work item comments, PR comment threads, work item field reference, identity resolution cascade, policy type GUIDs
+- **`examples.md`** - Real output samples for all major commands (PR list/show/policy, pipeline list/runs, run tree, work item JSON, query results, task logs, PR threads, work item comments, code suggestions)
+- **`examples/project-claude-ado.md`** - Template for project-specific ADO configuration (custom fields, work item types, area/iteration paths) to add to your CLAUDE.md

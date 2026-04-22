@@ -44,11 +44,11 @@ class NetworkMonitor {
 
 ### When You Do NOT Need Weak Self
 
-- **Structured tasks** (within `withTaskGroup`, `async let`) — their lifetime is scoped to the enclosing function, so they cannot outlive the caller
+- **Structured tasks** (within `withTaskGroup`, `async let`) - their lifetime is scoped to the enclosing function, so they cannot outlive the caller
 - **Short-lived unstructured tasks** that complete before `self` is deallocated (e.g., a one-shot network request)
 
 ```swift
-// This is fine — task completes quickly, no cycle risk
+// This is fine - task completes quickly, no cycle risk
 func fetchData() {
     Task {
         let data = try await api.fetch()
@@ -155,7 +155,7 @@ struct ContentView: View {
 }
 ```
 
-No manual cancellation or `[weak self]` needed — the `.task` lifetime is tied to the view.
+No manual cancellation or `[weak self]` needed - the `.task` lifetime is tied to the view.
 
 ---
 
@@ -168,7 +168,7 @@ class ResourceOwner: @MainActor {
     var connection: Connection?
 
     isolated deinit {
-        // Runs on MainActor — safe to access MainActor-isolated properties
+        // Runs on MainActor - safe to access MainActor-isolated properties
         connection?.close()
         NotificationCenter.default.post(name: .resourceReleased, object: nil)
     }
@@ -215,7 +215,7 @@ class ResourceOwner {
 }
 ```
 
-This workaround is fragile — the `Task` in `deinit` may run after related objects are already deallocated.
+This workaround is fragile - the `Task` in `deinit` may run after related objects are already deallocated.
 
 ---
 

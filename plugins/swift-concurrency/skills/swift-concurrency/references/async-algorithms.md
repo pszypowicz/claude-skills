@@ -36,7 +36,7 @@ import AsyncAlgorithms
 
 ## Time-Based Operators
 
-### debounce — Wait for Input to Settle
+### debounce - Wait for Input to Settle
 
 Emits a value only after a specified quiet period with no new values. Ideal for search-as-you-type.
 
@@ -62,7 +62,7 @@ Input:  H--He--Hel--Hell--Hello------->
 Output: ----------------------------Hello-->
 ```
 
-### throttle — Rate-Limit Emissions
+### throttle - Rate-Limit Emissions
 
 Emits at most one value per time interval. Use for rapid user actions where you want periodic sampling.
 
@@ -73,8 +73,8 @@ for await _ in likeButtonTaps.throttle(for: .seconds(1), latest: false) {
 }
 ```
 
-- `latest: true` — emit the most recent value in each window (default)
-- `latest: false` — emit the first value in each window
+- `latest: true` - emit the most recent value in each window (default)
+- `latest: false` - emit the first value in each window
 
 ### AsyncTimerSequence
 
@@ -92,7 +92,7 @@ Replaces `Timer.publish(every:on:in:)` from Combine. Respects task cancellation 
 
 ## Combining Operators
 
-### merge — Interleave Multiple Sequences
+### merge - Interleave Multiple Sequences
 
 Combines elements from multiple sequences into one, preserving arrival order.
 
@@ -111,7 +111,7 @@ for await message in allMessages {
 
 All input sequences must share the same `Element` type. The merged sequence finishes when all inputs finish.
 
-### combineLatest — React to Any Change
+### combineLatest - React to Any Change
 
 Emits a tuple of the latest values from each input whenever any input produces a new value.
 
@@ -129,7 +129,7 @@ for await (name, email, password) in combineLatest(
 
 Does not emit until every input has produced at least one value.
 
-### zip — Pair Elements One-to-One
+### zip - Pair Elements One-to-One
 
 Pairs elements from two sequences by index, waiting for both to produce.
 
@@ -142,7 +142,7 @@ for await (request, response) in zip(requests, responses) {
 
 The zipped sequence finishes when either input finishes.
 
-### chain — Sequential Concatenation
+### chain - Sequential Concatenation
 
 Consumes the first sequence to completion, then the second:
 
@@ -188,7 +188,7 @@ Task {
 **Key differences from AsyncStream:**
 - `send()` is `async` and applies backpressure (suspends until consumed)
 - Multiple consumers each get distinct elements (work distribution, not broadcasting)
-- No buffering policy needed — backpressure handles flow control
+- No buffering policy needed - backpressure handles flow control
 
 ---
 

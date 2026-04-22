@@ -55,9 +55,9 @@ let currentBalance = await account.balance
 
 ### How actor isolation works
 
-- Each actor has a **serial executor** -- a queue that runs one task at a time
+- Each actor has a **serial executor** - a queue that runs one task at a time
 - When you `await` an actor method, your task **suspends** until the actor is available
-- Inside the actor, code runs synchronously -- no data races possible
+- Inside the actor, code runs synchronously - no data races possible
 - Cross-actor calls are always async (require `await`)
 
 ---
@@ -68,7 +68,7 @@ A global actor provides a single shared instance that isolates code to a specifi
 
 ### @MainActor basics
 
-`@MainActor` ensures code runs on the main thread -- essential for UI updates.
+`@MainActor` ensures code runs on the main thread - essential for UI updates.
 
 ```swift
 // Apply to a class -- all members are main-actor-isolated
@@ -393,7 +393,7 @@ actor ImageCache {
 
 ### Key reentrancy rules
 
-1. **Always check state after an `await`** -- it may have changed
+1. **Always check state after an `await`** - it may have changed
 2. **Don't assume sequential execution** across suspension points
 3. **Track in-flight work** to avoid duplicate operations
 
@@ -417,7 +417,7 @@ func doWork(isolation: isolated (any Actor)? = #isolation) async {
 
 ### Task closure capture pattern for non-Sendable types
 
-This is the key pattern from SE-0420 -- capturing the caller's isolation in a Task to avoid Sendable requirements:
+This is the key pattern from SE-0420 - capturing the caller's isolation in a Task to avoid Sendable requirements:
 
 ```swift
 @MainActor
@@ -523,7 +523,7 @@ struct Counter: Sendable {
 | | Mutex | Actor |
 |---|---|---|
 | Access pattern | Synchronous only | Async (can suspend) |
-| Overhead | Minimal -- OS-level lock | Higher -- task scheduling |
+| Overhead | Minimal - OS-level lock | Higher - task scheduling |
 | Can call async code inside | No | Yes |
 | Sendable | Yes (with Sendable contents) | Yes (automatically) |
 | Reentrancy | No (deadlock risk) | Yes (by design) |
@@ -576,11 +576,11 @@ actor LoadingCache<Key: Hashable & Sendable, Value: Sendable> {
 
 ## Best Practices
 
-1. **Use @MainActor on ViewModels and UI-related classes** -- it replaces `DispatchQueue.main.async`.
+1. **Use @MainActor on ViewModels and UI-related classes** - it replaces `DispatchQueue.main.async`.
 2. **Mark entire classes/structs with @MainActor** rather than individual properties when most members need it.
 3. **Use `nonisolated`** for computed properties that only access `let` constants.
-4. **Be aware of reentrancy** -- always check state after suspension points.
-5. **Use `assumeIsolated`** carefully -- only when the calling framework guarantees the thread.
+4. **Be aware of reentrancy** - always check state after suspension points.
+5. **Use `assumeIsolated`** carefully - only when the calling framework guarantees the thread.
 6. **Prefer Mutex over actors** for simple synchronous state protection (iOS 18+).
 7. **Use actors for complex state** that involves async operations.
 8. **Track in-flight tasks** to prevent duplicate work in reentrant actors.

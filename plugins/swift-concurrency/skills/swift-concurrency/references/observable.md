@@ -28,13 +28,13 @@ Jump to:
 
 ## Why @Observable Does NOT Imply @MainActor
 
-The `@Observable` macro adds observation tracking to your class — it synthesizes property accessors that notify SwiftUI when values change. But it does **not** add any actor isolation. This is a critical distinction:
+The `@Observable` macro adds observation tracking to your class - it synthesizes property accessors that notify SwiftUI when values change. But it does **not** add any actor isolation. This is a critical distinction:
 
 ```swift
-// @Observable adds observation tracking only — no isolation
+// @Observable adds observation tracking only - no isolation
 @Observable
 final class ViewModel {
-    var items: [Item] = []  // No actor isolation — accessible from any context
+    var items: [Item] = []  // No actor isolation - accessible from any context
 }
 ```
 
@@ -80,7 +80,7 @@ final class ContentViewModel {
 Why this works:
 - `@MainActor` ensures all property access is serialized on the main actor
 - `async` methods can `await` background work, then update properties back on the main actor
-- SwiftUI reads properties during `body` — guaranteed to be on main actor
+- SwiftUI reads properties during `body` - guaranteed to be on main actor
 
 ### View model with background processing
 
@@ -170,7 +170,7 @@ struct ContentView: View {
 }
 ```
 
-`@State` instantiates the object once per view lifetime — the same guarantee `@StateObject` provided, but now for `@Observable` types. Do NOT use `@StateObject` with `@Observable`.
+`@State` instantiates the object once per view lifetime - the same guarantee `@StateObject` provided, but now for `@Observable` types. Do NOT use `@StateObject` with `@Observable`.
 
 ### Passing via environment
 
@@ -226,7 +226,7 @@ struct EditBookView: View {
 
 ### Performance advantage
 
-With `ObservableObject`, a view re-evaluates whenever **any** `@Published` property changes. With `@Observable`, SwiftUI tracks which properties `body` actually reads and only updates when those specific properties change. This is automatic — no opt-in needed.
+With `ObservableObject`, a view re-evaluates whenever **any** `@Published` property changes. With `@Observable`, SwiftUI tracks which properties `body` actually reads and only updates when those specific properties change. This is automatic - no opt-in needed.
 
 ---
 
@@ -290,7 +290,7 @@ final class DataProcessor {
 final class ViewModel {
     var items: [Item] = []
 
-    // Inherits caller's isolation — if called from @MainActor view, runs on main actor
+    // Inherits caller's isolation - if called from @MainActor view, runs on main actor
     nonisolated(nonsending) func loadItems() async {
         items = await APIClient.fetchItems()
     }
@@ -441,7 +441,7 @@ This means migrating one type at a time is safe, but you may notice slightly dif
 ### When NOT to use @Observable
 
 - **Value types**: `@Observable` only works with classes. Use regular structs with `@State`.
-- **Types that must be Sendable without actor isolation**: `@Observable` classes are reference types — they need actor isolation or `@unchecked Sendable`.
+- **Types that must be Sendable without actor isolation**: `@Observable` classes are reference types - they need actor isolation or `@unchecked Sendable`.
 - **Backward compatibility below iOS 17/macOS 14**: `@Observable` requires the Observation framework.
 
 ---
@@ -477,7 +477,7 @@ Don't conform to both protocols:
 @Observable
 final class ViewModel: ObservableObject { ... }
 
-// ✅ Pick one — prefer @Observable for new code
+// ✅ Pick one - prefer @Observable for new code
 @Observable
 final class ViewModel { ... }
 ```
@@ -546,10 +546,10 @@ Using @Observable macro?
 
 ## Best Practices
 
-1. **Always pair `@Observable` with `@MainActor` for view models** — the macro does not add isolation.
-2. **Use `@State` for ownership, `@Environment` for injection, `@Bindable` for bindings** — never use the old `ObservableObject` wrappers with `@Observable`.
-3. **Prefer whole-class `@MainActor` over per-property isolation** — simpler to reason about and maintain.
-4. **Extract heavy computation to nonisolated functions or separate actors** — keep the view model thin.
-5. **Make data types Sendable** — especially types that flow between actors and observable view models.
-6. **Don't conform to both `ObservableObject` and `Observable`** — pick one per type.
-7. **Test with Thread Sanitizer** — catches runtime data races that the compiler may miss in Swift 5 mode.
+1. **Always pair `@Observable` with `@MainActor` for view models** - the macro does not add isolation.
+2. **Use `@State` for ownership, `@Environment` for injection, `@Bindable` for bindings** - never use the old `ObservableObject` wrappers with `@Observable`.
+3. **Prefer whole-class `@MainActor` over per-property isolation** - simpler to reason about and maintain.
+4. **Extract heavy computation to nonisolated functions or separate actors** - keep the view model thin.
+5. **Make data types Sendable** - especially types that flow between actors and observable view models.
+6. **Don't conform to both `ObservableObject` and `Observable`** - pick one per type.
+7. **Test with Thread Sanitizer** - catches runtime data races that the compiler may miss in Swift 5 mode.

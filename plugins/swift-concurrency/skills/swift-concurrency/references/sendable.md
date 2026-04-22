@@ -16,7 +16,7 @@ Swift Concurrency divides your program into **isolation domains**. Each domain h
 - **@MainActor** is a single global isolation domain (the main thread)
 - **Nonisolated async code** is another domain (the concurrent thread pool)
 
-When data crosses a boundary between isolation domains, it must be **Sendable** -- safe to transfer between concurrent contexts without data races.
+When data crosses a boundary between isolation domains, it must be **Sendable** - safe to transfer between concurrent contexts without data races.
 
 ```
 ┌─────────────────┐         ┌─────────────────┐
@@ -111,7 +111,7 @@ public struct APIVersion: Sendable {
 Standard library collections (`Array`, `Dictionary`, `Set`) are Sendable when their elements are Sendable. They use COW, which is safe because:
 
 - When you pass an array to another isolation domain, it gets its own copy
-- If the original is mutated, COW triggers a copy -- no shared mutable state
+- If the original is mutated, COW triggers a copy - no shared mutable state
 
 ```swift
 // Sendable -- [String] elements are Sendable
@@ -134,8 +134,8 @@ Reference types are **not Sendable by default** because multiple isolation domai
 
 A class can be Sendable if it meets ALL of these requirements:
 
-1. **`final`** -- no subclasses can break invariants
-2. **All stored properties are `let`** -- immutable
+1. **`final`** - no subclasses can break invariants
+2. **All stored properties are `let`** - immutable
 3. **All stored properties are Sendable**
 
 ```swift
@@ -263,7 +263,7 @@ func performAsync(_ operation: @Sendable @escaping () async -> Void) {
 
 ## @unchecked Sendable
 
-`@unchecked Sendable` tells the compiler "trust me, this is safe" without verifying it. **The compiler performs no checks** -- you are responsible for thread safety.
+`@unchecked Sendable` tells the compiler "trust me, this is safe" without verifying it. **The compiler performs no checks** - you are responsible for thread safety.
 
 ### Risks
 
@@ -386,7 +386,7 @@ func storeInActor(_ value: sending [NSObject]) async {
 ### Key rules for sending
 
 1. After passing a value as `sending`, the caller cannot use it again
-2. The value must be in a **disconnected region** -- no aliases in the caller's isolation domain
+2. The value must be in a **disconnected region** - no aliases in the caller's isolation domain
 3. This enables safe transfer of non-Sendable types without `@unchecked Sendable`
 
 ---
@@ -567,9 +567,9 @@ extension ExternalType: @unchecked Sendable {}
 
 ## Best Practices
 
-1. **Prefer value types** -- they're implicitly Sendable when their properties are.
-2. **Use @MainActor for UI classes** -- it makes them implicitly Sendable.
-3. **Use actors for complex shared state** -- they're always Sendable.
+1. **Prefer value types** - they're implicitly Sendable when their properties are.
+2. **Use @MainActor for UI classes** - it makes them implicitly Sendable.
+3. **Use actors for complex shared state** - they're always Sendable.
 4. **Avoid @unchecked Sendable** unless you have internal synchronization and document why it's safe.
 5. **Use `sending`** to transfer non-Sendable values across isolation boundaries (Swift 6).
 6. **Use Mutex** (iOS 18+) for simple synchronous state protection.
