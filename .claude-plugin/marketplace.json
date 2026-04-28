@@ -1,5 +1,8 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "claude-skills",
+  "version": "1.0.0",
+  "description": "Personal Claude Code plugins: Azure DevOps, Go, Swift (concurrency + modern features), and git worktree workflows.",
   "owner": {
     "name": "Przemyslaw Szypowicz"
   },

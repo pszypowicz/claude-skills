@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "worktrees",
   "description": "Batch-provision git worktrees for planned work across multiple repos under ~/Developer/. Use when starting a project or kicking off tasks that span repos, plus status/lookup/teardown commands for the resulting worktrees.",
   "version": "1.0.0",
