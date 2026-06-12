@@ -11,7 +11,7 @@
       "name": "ado",
       "source": "./plugins/ado",
       "description": "Azure DevOps operations -- PRs, pipelines, policies, builds, variable groups, environments, feeds, branches, work items, comments.",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "tags": ["azure-devops", "ado", "pipelines", "pull-requests", "work-items", "ci-cd"]
     },
     {

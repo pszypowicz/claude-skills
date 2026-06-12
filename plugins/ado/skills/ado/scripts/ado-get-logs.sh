@@ -51,7 +51,7 @@ failed_only = sys.argv[2] == 'true'
 task_filter = sys.argv[3].lower()
 
 records = tl.get('records', [])
-tasks = [r for r in records if r.get('type') == 'Task' and r.get('log', {}).get('id')]
+tasks = [r for r in records if r.get('type') == 'Task' and (r.get('log') or {}).get('id')]
 tasks.sort(key=lambda r: r.get('order', 0))
 
 for t in tasks:
