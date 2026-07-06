@@ -18,13 +18,19 @@ Use `az` CLI commands for most operations and bash scripts for complex multi-ste
 
 ## Authentication
 
-Before running any command, check that auth env vars are set:
+Credentials come from environment variables exported in the terminal **before** the session starts; they are inherited read-only. This skill only reads them - it never exports or mutates session credentials. Two shapes are supported:
+
+- **Single org (default):** the plain triple `ADO_ORG`, `ADO_PROJECT`, `AZURE_DEVOPS_EXT_PAT`. Commands use these directly.
+- **Named profiles:** one namespaced triple per alias `<X>` - `<X>_ADO_ORG`, `<X>_ADO_PROJECT`, `<X>_ADO_PAT` (e.g. `WORK_ADO_ORG`, `PERSONAL_ADO_ORG`). Any number can be loaded at once; the set of `*_ADO_ORG` vars is the profile registry.
+
+Check what is available:
 
 ```bash
 echo "ORG=${ADO_ORG:-MISSING} PROJECT=${ADO_PROJECT:-MISSING} PAT=${AZURE_DEVOPS_EXT_PAT:+set}"
+env | grep -o '^[A-Za-z0-9_]*_ADO_ORG' | sort   # named profiles, if any
 ```
 
-If any are **MISSING**, stop and instruct the user:
+If nothing is set, stop and instruct the user:
 
 > Please set the following in your terminal (outside Claude Code), then start a new session:
 >
@@ -33,6 +39,35 @@ If any are **MISSING**, stop and instruct the user:
 > export ADO_PROJECT=<project>
 > export AZURE_DEVOPS_EXT_PAT=<pat>
 > ```
+
+### Selecting a profile
+
+With the plain triple (single org), run commands as-is - `$ADO_ORG` / `$ADO_PROJECT` / `$AZURE_DEVOPS_EXT_PAT` are already set.
+
+With named profiles, source the helper and bind one. It resolves an alias in this order: an explicit name, then `$ADO_PROFILE`, then the working directory (a clone under `.../dev.azure.com/<org>/...`), then the sole profile; if it cannot decide it lists the profiles and fails - ask the user which to use.
+
+```bash
+source "${CLAUDE_SKILL_DIR}/scripts/lib/ado-profile.sh"
+
+eval "$(ado_env auto)"     # bind the whole block to the auto-detected profile...
+eval "$(ado_env WORK)"     # ...or to a named one; then use $ADO_ORG etc. as normal
+ado_with WORK 'az repos pr list --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false'   # ...or run one command
+ado_profile                # print which alias auto-detect would choose (empty => plain triple)
+```
+
+`ado_env` / `ado_with` bind the generic triple only transiently (the current block, or that single command); nothing persists past it, and the wrapper scripts under `scripts/` resolve the same way. Pass an `ado_with` command as a single-quoted string so `$ADO_ORG` expands after binding.
+
+### Working across profiles (source -> destination)
+
+Every loaded profile is available at once, so a migration-style task reads from one and writes to another - address each side explicitly (one block cannot bind two orgs):
+
+```bash
+source "${CLAUDE_SKILL_DIR}/scripts/lib/ado-profile.sh"
+ado_with SRC 'az boards work-item show --id <ID> --org "$ADO_ORG" --detect false -o json'                    # read from SRC
+ado_with DST 'az boards work-item create --title "..." --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false'    # write to DST
+```
+
+For raw REST, interpolate the namespaced vars directly: `"${SRC_ADO_ORG}/..."` with `-u ":$SRC_ADO_PAT"` for the source, `"${DST_ADO_ORG}/..."` with `-u ":$DST_ADO_PAT"` for the destination.
 
 Prefer the `az` CLI; fall back to `curl` + PAT for REST endpoints that `az` doesn't cover (`az rest` is ARM-only and does not work against ADO APIs).
 
