@@ -411,13 +411,23 @@ ${CLAUDE_SKILL_DIR}/scripts/ado-get-logs.sh --run-id <id> --failed-only
 ${CLAUDE_SKILL_DIR}/scripts/ado-get-logs.sh --run-id <id> --task "Plan" --tail 100
 ```
 
-## Branches & Feeds
+## Branches, Tags & Feeds
 
 ```bash
 az repos ref delete --name heads/<branch> -r <repo> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 az artifacts feed list --org "$ADO_ORG" --detect false
 az artifacts feed create --name <name> --org "$ADO_ORG" --detect false
 az artifacts feed delete --feed <name> --org "$ADO_ORG" --detect false
+```
+
+### Tags
+
+Prefer **annotated** tags (`git tag -a`): ADO's Tags view shows the tagger, date, and message only for annotated tag objects - a lightweight tag renders with an empty creator and no message. Fetch the remote first so the tag lands on the current commit and existing tags are visible.
+
+```bash
+git fetch origin --tags
+git tag -a v1.2.3 <commit> -m "<repo> v1.2.3: what this release ships"
+git push origin v1.2.3
 ```
 
 ## Environments, Checks & Approvals (REST API)
