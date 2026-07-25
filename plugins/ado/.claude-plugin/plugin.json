@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "ado",
-  "description": "Azure DevOps operations - PRs, pipelines, policies, builds, variable groups, environments, feeds, branches, work items, comments. This skill should be used when the user asks to \"create a PR\", \"list pipelines\", \"run a pipeline\", \"check build status\", \"debug failed pipeline\", \"create a policy\", \"add reviewers\", \"create a work item\", \"update a task\", \"list environments\", \"approve a pipeline\", \"manage variable groups\", \"delete a branch\", \"comment on a PR\", \"review PR comments\", \"comment on work items\", \"resolve PR thread\", \"code suggestion\", or mentions Azure DevOps, ADO, or az devops CLI. Uses az CLI with PAT auth.",
-  "version": "1.0.3",
+  "description": "Azure DevOps operations - PRs, pipelines, policies, builds, variable groups, environments, feeds, branches, work items, comments. This skill should be used when the user asks to \"create a PR\", \"list pipelines\", \"run a pipeline\", \"check build status\", \"debug failed pipeline\", \"create a policy\", \"add reviewers\", \"create a work item\", \"update a task\", \"list environments\", \"approve a pipeline\", \"manage variable groups\", \"delete a branch\", \"comment on a PR\", \"review PR comments\", \"comment on work items\", \"resolve PR thread\", \"code suggestion\", or mentions Azure DevOps, ADO, or az devops CLI. Uses az CLI with PAT auth, falling back to az login tokens.",
+  "version": "1.1.0",
   "author": {
     "name": "Przemyslaw Szypowicz"
   }

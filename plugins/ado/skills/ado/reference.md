@@ -69,7 +69,7 @@ az repos pr show --id 42 --query "reviewers[?vote==\`0\`].displayName" -o json
 ### Base Setup
 
 ```bash
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+# AUTH as set in SKILL.md's Authentication section (Basic PAT or az Bearer token)
 BASE="${ADO_ORG}/${ADO_PROJECT}/_apis"
 ```
 
@@ -384,7 +384,7 @@ az boards query --wiql "SELECT [System.Id], [System.Title], [System.State] FROM 
 If `az repos pr work-item add` doesn't work, use REST:
 
 ```bash
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+# AUTH as set in SKILL.md's Authentication section (Basic PAT or az Bearer token)
 # Get repo ID and project ID first
 REPO_ID=$(az repos show -r <repo> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false --query id -o tsv)
 PROJECT_ID=$(curl -s -H "$AUTH" "${ADO_ORG}/_apis/projects/${ADO_PROJECT}?api-version=7.1" | python3 -c "import sys,json;print(json.load(sys.stdin)['id'])")

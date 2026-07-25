@@ -9,7 +9,7 @@ description: >-
   "approve a pipeline", "manage variable groups", "delete a branch",
   "comment on a PR", "review PR comments", "comment on work items",
   "resolve PR thread", "code suggestion", or mentions Azure DevOps, ADO, or
-  az devops CLI. Uses az CLI with PAT auth.
+  az devops CLI. Uses az CLI with PAT auth, falling back to az login tokens.
 ---
 
 # Azure DevOps Operations
@@ -23,22 +23,15 @@ Credentials come from environment variables exported in the terminal **before** 
 - **Single org (default):** the plain triple `ADO_ORG`, `ADO_PROJECT`, `AZURE_DEVOPS_EXT_PAT`. Commands use these directly.
 - **Named profiles:** one namespaced triple per alias `<X>` - `<X>_ADO_ORG`, `<X>_ADO_PROJECT`, `<X>_ADO_PAT` (e.g. `WORK_ADO_ORG`, `PERSONAL_ADO_ORG`). Any number can be loaded at once; the set of `*_ADO_ORG` vars is the profile registry.
 
+When no PAT is exported in either shape, an `az login` session can stand in for it - see "az CLI token fallback" below.
+
 Check what is available:
 
 ```bash
-echo "ORG=${ADO_ORG:-MISSING} PROJECT=${ADO_PROJECT:-MISSING} PAT=${AZURE_DEVOPS_EXT_PAT:+set}"
+echo "ORG=${ADO_ORG:-MISSING} PROJECT=${ADO_PROJECT:-MISSING} PAT=${AZURE_DEVOPS_EXT_PAT:+set} TOKEN=${ADO_TOKEN:+set}"
 env | grep -o '^[A-Za-z0-9_]*_ADO_ORG' | sort   # named profiles, if any
+az account show --query user.name -o tsv 2>/dev/null || echo "az: not logged in"
 ```
-
-If nothing is set, stop and instruct the user:
-
-> Please set the following in your terminal (outside Claude Code), then start a new session:
->
-> ```
-> export ADO_ORG=https://dev.azure.com/<org>
-> export ADO_PROJECT=<project>
-> export AZURE_DEVOPS_EXT_PAT=<pat>
-> ```
 
 ### Selecting a profile
 
@@ -69,7 +62,41 @@ ado_with DST 'az boards work-item create --title "..." --org "$ADO_ORG" -p "$ADO
 
 For raw REST, interpolate the namespaced vars directly: `"${SRC_ADO_ORG}/..."` with `-u ":$SRC_ADO_PAT"` for the source, `"${DST_ADO_ORG}/..."` with `-u ":$DST_ADO_PAT"` for the destination.
 
-Prefer the `az` CLI; fall back to `curl` + PAT for REST endpoints that `az` doesn't cover (`az rest` is ARM-only and does not work against ADO APIs).
+### az CLI token fallback (no PAT exported)
+
+Once org and project are known, auth resolves in this order (mirrors `scripts/lib/ado-client.sh`, which the bundled scripts use automatically):
+
+1. **`AZURE_DEVOPS_EXT_PAT`** - PAT. The `az` CLI picks it up automatically; curl uses Basic auth.
+2. **`ADO_TOKEN`** - pre-minted Entra access token; curl uses Bearer auth.
+3. **az CLI login** - no credential env vars needed, requires a prior `az login`. The `az devops`/`az repos`/`az pipelines`/`az boards` commands authenticate with the signed-in account on their own; only `ADO_ORG` and `ADO_PROJECT` are still required. For curl, mint a token for the Azure DevOps resource (`499b84ac-1321-427f-aa17-267ca6975798` - fixed public GUID, same for every tenant).
+
+az-minted tokens expire after about an hour. On an unexpected 401 (or an HTML sign-in page in a response body) mid-session, re-mint the token and rebuild `AUTH` before suspecting a permissions problem. The Bearer token also works against the `vssps.dev.azure.com` and `feeds.dev.azure.com` hosts.
+
+If `ADO_ORG` or `ADO_PROJECT` is missing, derive them from the repo remote when possible (`git remote get-url origin`; HTTPS remotes look like `https://dev.azure.com/<org>/<project>/_git/<repo>`, SSH like `git@ssh.dev.azure.com:v3/<org>/<project>/<repo>`) and set them for the commands you run.
+
+### REST auth header
+
+Set `AUTH` once from whichever source is available - the curl snippets in this skill pass `-H "$AUTH"` and work with either form:
+
+```bash
+if [[ -n "${AZURE_DEVOPS_EXT_PAT:-}" ]]; then
+  AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+else
+  AUTH="Authorization: Bearer ${ADO_TOKEN:-$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv)}"
+fi
+```
+
+Stop and instruct the user only when no auth source works (no PAT in either shape, no `ADO_TOKEN`, and `az account show` fails):
+
+> Either run `az login` in your terminal, or set the following (outside Claude Code) and start a new session:
+>
+> ```
+> export ADO_ORG=https://dev.azure.com/<org>
+> export ADO_PROJECT=<project>
+> export AZURE_DEVOPS_EXT_PAT=<pat>
+> ```
+
+Prefer the `az` CLI; fall back to `curl -H "$AUTH"` for REST endpoints that `az` doesn't cover (`az rest` is ARM-only and does not work against ADO APIs).
 
 All `az` commands use `--org "$ADO_ORG" -p "$ADO_PROJECT" --detect false`.
 
@@ -140,7 +167,7 @@ az repos pr policy queue --id <ID> -e <eval-id> --org "$ADO_ORG" --detect false
 Adding PR reviewers under PAT auth requires the **vssps identity id**, not the entitlement id returned by `az devops user list`. They are different GUIDs for the same user, and only the vssps one works. `az repos pr reviewer add` fails for both, so use REST:
 
 ```bash
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+# AUTH as set in the Authentication section (Basic PAT or az Bearer token)
 VSSPS="${ADO_ORG/dev.azure.com/vssps.dev.azure.com}"
 REPO_ID=$(az repos show -r <repo> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false --query id -o tsv)
 
@@ -159,11 +186,10 @@ If the PUT response body comes back empty (no displayName, no error), the id was
 
 ### PR Comments & Threads
 
-All PR comment operations require curl with PAT auth (`az rest` does not work with ADO APIs).
+All PR comment operations require curl with `$AUTH` (`az rest` does not work with ADO APIs).
 
 ````bash
-# Auth setup (reuse across commands)
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+# AUTH as set in the Authentication section (Basic PAT or az Bearer token)
 THREADS="${ADO_ORG}/${ADO_PROJECT}/_apis/git/repositories/<repo>/pullRequests/<prId>/threads"
 
 # List active threads (script - handles filtering + formatting)
@@ -232,7 +258,7 @@ az pipelines delete --id <id> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 ```bash
 # Identifier is the YAML `- stage: <id>`, not the displayName. Grab it from a
 # prior run's timeline: `records[].type == 'Stage'` -> `.identifier`.
-curl -sS -u ":$AZURE_DEVOPS_EXT_PAT" -X POST \
+curl -sS -H "$AUTH" -X POST \
   "$ADO_ORG/$ADO_PROJECT/_apis/pipelines/<pipelineId>/runs?api-version=7.1-preview.1" \
   -H "Content-Type: application/json" \
   -d '{
@@ -330,12 +356,12 @@ az boards work-item update --id <ID> --discussion "Started work on this" \
 
 ### Comments
 
-Full CRUD on work item comments requires REST API (curl + PAT). The `--discussion` flag above is append-only and does **not** support @mentions.
+Full CRUD on work item comments requires REST API (curl with `$AUTH`). The `--discussion` flag above is append-only and does **not** support @mentions.
 
 **@Mentions in comments:** Use the REST API with HTML mention format. The `--discussion` flag renders mentions as plain text.
 
 ```bash
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+# AUTH as set in the Authentication section (Basic PAT or az Bearer token)
 WI_COMMENTS="${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workItems/<id>/comments"
 
 # Post comment with @mention (use identity GUID and email)
@@ -345,7 +371,7 @@ curl -s -H "$AUTH" -H "Content-Type: application/json" -X POST \
 ```
 
 ```bash
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+# AUTH as set in the Authentication section (Basic PAT or az Bearer token)
 WI_COMMENTS="${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workItems/<id>/comments"
 
 # List comments (most recent first)
@@ -515,7 +541,7 @@ az pipelines variable-group variable delete --group-id 3 --name OLD_VAR --org "$
 
 ```bash
 # List environments
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+# AUTH as set in the Authentication section (Basic PAT or az Bearer token)
 BASE="${ADO_ORG}/${ADO_PROJECT}/_apis"
 
 curl -s -H "$AUTH" "$BASE/distributedtask/environments?api-version=7.1"
@@ -541,7 +567,7 @@ ${CLAUDE_SKILL_DIR}/scripts/ado-pr-threads.sh --pr-id <ID> --repo <repo> --json 
   | python3 -c "import sys,json; threads=json.load(sys.stdin); t=[x for x in threads if x['id']==<threadId>]; print(json.dumps(t[0],indent=2)) if t else print('Not found')"
 
 # 3. Reply to reviewer feedback
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+# AUTH as set in the Authentication section (Basic PAT or az Bearer token)
 THREADS="${ADO_ORG}/${ADO_PROJECT}/_apis/git/repositories/<repo>/pullRequests/<ID>/threads"
 curl -s -H "$AUTH" -H "Content-Type: application/json" -X POST \
   "${THREADS}/<threadId>/comments?api-version=7.1" \
@@ -570,7 +596,7 @@ curl -s -H "$AUTH" -H "Content-Type: application/json" -X POST \
 az boards work-item show --id <WI_ID> --expand all --org "$ADO_ORG" --detect false -o json
 
 # 1b. Load work item comments for context
-AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
+# AUTH as set in the Authentication section (Basic PAT or az Bearer token)
 curl -s -H "$AUTH" -H "Content-Type: application/json" \
   "${ADO_ORG}/${ADO_PROJECT}/_apis/wit/workItems/<WI_ID>/comments?\$top=10&order=desc&api-version=7.1-preview.4"
 
@@ -664,7 +690,7 @@ Check CLAUDE.md for project-specific ADO configuration (custom work item types, 
 
 When the user asks for an ADO operation:
 
-1. Ensure auth env vars are set (check, then instruct user to resolve if missing)
+1. Resolve auth per the Authentication section (PAT, `ADO_TOKEN`, or az login token); instruct the user only if no source works
 2. Use `az` CLI with `-o json` when parsing programmatically, `-o table` for display
 3. For complex queries, chain commands (e.g., list pipelines -> find ID -> run pipeline)
 4. Use scripts from `${CLAUDE_SKILL_DIR}/scripts/` for: create-policy, get-run, get-logs, pr-threads
