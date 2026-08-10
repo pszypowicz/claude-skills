@@ -82,7 +82,8 @@ ado_profile() {
     printf 'ado: name one (ado_with <ALIAS> ..., eval "$(ado_env <ALIAS>)") or export ADO_PROFILE. Available:\n' >&2
   else
     printf 'ado: no ADO credentials found. Export the plain ADO_ORG/ADO_PROJECT/AZURE_DEVOPS_EXT_PAT,\n' >&2
-    printf 'ado: or a namespaced <ALIAS>_ADO_ORG/PROJECT/PAT set (e.g. via ,ado-pat --prefix <ALIAS>).\n' >&2
+    printf 'ado: export a namespaced <ALIAS>_ADO_ORG/PROJECT/PAT set, or read a sequester profile\n' >&2
+    printf 'ado: per command (sequester env exec <PROFILE> -- ...).\n' >&2
   fi
   ado_profiles >&2
   return 1

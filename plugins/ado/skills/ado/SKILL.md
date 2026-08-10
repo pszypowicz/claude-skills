@@ -23,13 +23,14 @@ Credentials come from environment variables exported in the terminal **before** 
 - **Single org (default):** the plain triple `ADO_ORG`, `ADO_PROJECT`, `AZURE_DEVOPS_EXT_PAT`. Commands use these directly.
 - **Named profiles:** one namespaced triple per alias `<X>` - `<X>_ADO_ORG`, `<X>_ADO_PROJECT`, `<X>_ADO_PAT` (e.g. `WORK_ADO_ORG`, `PERSONAL_ADO_ORG`). Any number can be loaded at once; the set of `*_ADO_ORG` vars is the profile registry.
 
-When no PAT is exported in either shape, an `az login` session can stand in for it - see "az CLI token fallback" below.
+When nothing is exported, two more sources can stand in: a [sequester](https://github.com/pszypowicz/sequester) secrets profile read per command block (see "Sequester profiles" below), or an `az login` session (see "az CLI token fallback" below).
 
 Check what is available:
 
 ```bash
 echo "ORG=${ADO_ORG:-MISSING} PROJECT=${ADO_PROJECT:-MISSING} PAT=${AZURE_DEVOPS_EXT_PAT:+set} TOKEN=${ADO_TOKEN:+set}"
 env | grep -o '^[A-Za-z0-9_]*_ADO_ORG' | sort   # named profiles, if any
+command -v sequester >/dev/null && sequester secret list   # sequester profiles (names only, no prompt)
 az account show --query user.name -o tsv 2>/dev/null || echo "az: not logged in"
 ```
 
@@ -62,6 +63,18 @@ ado_with DST 'az boards work-item create --title "..." --org "$ADO_ORG" -p "$ADO
 
 For raw REST, interpolate the namespaced vars directly: `"${SRC_ADO_ORG}/..."` with `-u ":$SRC_ADO_PAT"` for the source, `"${DST_ADO_ORG}/..."` with `-u ":$DST_ADO_PAT"` for the destination.
 
+### Sequester profiles (nothing exported)
+
+When no credential env vars are inherited and the `sequester` CLI is on PATH, read the triple from a sequester secrets profile per command block. `sequester secret list` prints profile names and their variable names without prompting - pick the profile holding `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT` (project CLAUDE.md may name the one to use; ask the user if several match). Wrap the block so the values exist only in the child process:
+
+```bash
+sequester env exec <PROFILE> -- bash -c '
+  az repos pr list -r <repo> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
+'
+```
+
+Single-quote the block so `$ADO_ORG` expands inside the child, not the calling shell. Each `env exec` is one profile read and may require a Touch ID tap from the user, so batch every command that needs credentials into one block per exec rather than wrapping commands individually. The bundled scripts run the same way: `sequester env exec <PROFILE> -- ${CLAUDE_SKILL_DIR}/scripts/ado-pr-threads.sh ...`.
+
 ### az CLI token fallback (no PAT exported)
 
 Once org and project are known, auth resolves in this order (mirrors `scripts/lib/ado-client.sh`, which the bundled scripts use automatically):
@@ -76,7 +89,7 @@ If `ADO_ORG` or `ADO_PROJECT` is missing, derive them from the repo remote when 
 
 ### REST auth header
 
-Set `AUTH` once from whichever source is available - the curl snippets in this skill pass `-H "$AUTH"` and work with either form:
+Set `AUTH` once from whichever source is available - the curl snippets in this skill pass `-H "$AUTH"` and work with either form. Under a sequester profile, build `AUTH` inside the wrapped block - the variables only exist there:
 
 ```bash
 if [[ -n "${AZURE_DEVOPS_EXT_PAT:-}" ]]; then
@@ -86,9 +99,9 @@ else
 fi
 ```
 
-Stop and instruct the user only when no auth source works (no PAT in either shape, no `ADO_TOKEN`, and `az account show` fails):
+Stop and instruct the user only when no auth source works (no PAT in either shape, no sequester profile holding the triple, no `ADO_TOKEN`, and `az account show` fails):
 
-> Either run `az login` in your terminal, or set the following (outside Claude Code) and start a new session:
+> Either run `az login` in your terminal, create a sequester profile holding `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT`, or set the following (outside Claude Code) and start a new session:
 >
 > ```
 > export ADO_ORG=https://dev.azure.com/<org>
