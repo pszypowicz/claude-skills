@@ -9,7 +9,8 @@ description: >-
   "approve a pipeline", "manage variable groups", "delete a branch",
   "comment on a PR", "review PR comments", "comment on work items",
   "resolve PR thread", "code suggestion", or mentions Azure DevOps, ADO, or
-  az devops CLI. Uses az CLI with PAT auth, falling back to az login tokens.
+  az devops CLI. Uses az CLI with PAT auth from the environment or a sequester
+  profile, falling back to az login tokens.
 ---
 
 # Azure DevOps Operations
@@ -18,10 +19,7 @@ Use `az` CLI commands for most operations and bash scripts for complex multi-ste
 
 ## Authentication
 
-Credentials come from environment variables exported in the terminal **before** the session starts; they are inherited read-only. This skill only reads them - it never exports or mutates session credentials. Two shapes are supported:
-
-- **Single org (default):** the plain triple `ADO_ORG`, `ADO_PROJECT`, `AZURE_DEVOPS_EXT_PAT`. Commands use these directly.
-- **Named profiles:** one namespaced triple per alias `<X>` - `<X>_ADO_ORG`, `<X>_ADO_PROJECT`, `<X>_ADO_PAT` (e.g. `WORK_ADO_ORG`, `PERSONAL_ADO_ORG`). Any number can be loaded at once; the set of `*_ADO_ORG` vars is the profile registry.
+Credentials come from environment variables exported in the terminal **before** the session starts; they are inherited read-only. This skill only reads them - it never exports or mutates session credentials. The expected shape is the plain triple `ADO_ORG`, `ADO_PROJECT`, `AZURE_DEVOPS_EXT_PAT` - commands use these directly.
 
 When nothing is exported, two more sources can stand in: a [sequester](https://github.com/pszypowicz/sequester) secrets profile read per command block (see "Sequester profiles" below), or an `az login` session (see "az CLI token fallback" below).
 
@@ -29,51 +27,26 @@ Check what is available:
 
 ```bash
 echo "ORG=${ADO_ORG:-MISSING} PROJECT=${ADO_PROJECT:-MISSING} PAT=${AZURE_DEVOPS_EXT_PAT:+set} TOKEN=${ADO_TOKEN:+set}"
-env | grep -o '^[A-Za-z0-9_]*_ADO_ORG' | sort   # named profiles, if any
 command -v sequester >/dev/null && sequester secret list   # sequester profiles (names only, no prompt)
 az account show --query user.name -o tsv 2>/dev/null || echo "az: not logged in"
 ```
 
-### Selecting a profile
-
-With the plain triple (single org), run commands as-is - `$ADO_ORG` / `$ADO_PROJECT` / `$AZURE_DEVOPS_EXT_PAT` are already set.
-
-With named profiles, source the helper and bind one. It resolves an alias in this order: an explicit name, then `$ADO_PROFILE`, then the working directory (a clone under `.../dev.azure.com/<org>/...`), then the sole profile; if it cannot decide it lists the profiles and fails - ask the user which to use.
-
-```bash
-source "${CLAUDE_SKILL_DIR}/scripts/lib/ado-profile.sh"
-
-eval "$(ado_env auto)"     # bind the whole block to the auto-detected profile...
-eval "$(ado_env WORK)"     # ...or to a named one; then use $ADO_ORG etc. as normal
-ado_with WORK 'az repos pr list --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false'   # ...or run one command
-ado_profile                # print which alias auto-detect would choose (empty => plain triple)
-```
-
-`ado_env` / `ado_with` bind the generic triple only transiently (the current block, or that single command); nothing persists past it, and the wrapper scripts under `scripts/` resolve the same way. Pass an `ado_with` command as a single-quoted string so `$ADO_ORG` expands after binding.
-
-### Working across profiles (source -> destination)
-
-Every loaded profile is available at once, so a migration-style task reads from one and writes to another - address each side explicitly (one block cannot bind two orgs):
-
-```bash
-source "${CLAUDE_SKILL_DIR}/scripts/lib/ado-profile.sh"
-ado_with SRC 'az boards work-item show --id <ID> --org "$ADO_ORG" --detect false -o json'                    # read from SRC
-ado_with DST 'az boards work-item create --title "..." --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false'    # write to DST
-```
-
-For raw REST, interpolate the namespaced vars directly: `"${SRC_ADO_ORG}/..."` with `-u ":$SRC_ADO_PAT"` for the source, `"${DST_ADO_ORG}/..."` with `-u ":$DST_ADO_PAT"` for the destination.
-
 ### Sequester profiles (nothing exported)
 
-When no credential env vars are inherited and the `sequester` CLI is on PATH, read the triple from a sequester secrets profile per command block. `sequester secret list` prints profile names and their variable names without prompting - pick the profile holding `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT` (project CLAUDE.md may name the one to use; ask the user if several match). Wrap the block so the values exist only in the child process:
+When no credential env vars are inherited and the `sequester` CLI is on PATH, read the PAT from a sequester secrets profile per command block. The convention is one profile per org, named as the org URL segment (the `<org>` in `https://dev.azure.com/<org>`), holding a single `AZURE_DEVOPS_EXT_PAT` - PATs are org-scoped, so the org identifies both the profile and the token. `sequester secret list` prints profile names and their variable names without prompting.
+
+`ADO_ORG` and `ADO_PROJECT` are not secrets. Derive them from the clone path (`.../dev.azure.com/<org>/<project>/...`) or the repo remote, and set them inside the wrapped block - the profile supplies only the PAT:
 
 ```bash
-sequester env exec <PROFILE> -- bash -c '
+sequester env exec <org> -- bash -c '
+  export ADO_ORG=https://dev.azure.com/<org> ADO_PROJECT=<project>
   az repos pr list -r <repo> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 '
 ```
 
-Single-quote the block so `$ADO_ORG` expands inside the child, not the calling shell. Each `env exec` is one profile read and may require a Touch ID tap from the user, so batch every command that needs credentials into one block per exec rather than wrapping commands individually. The bundled scripts run the same way: `sequester env exec <PROFILE> -- ${CLAUDE_SKILL_DIR}/scripts/ado-pr-threads.sh ...`.
+Single-quote the block so the PAT never touches the calling shell. Each `env exec` is one profile read and may require a Touch ID tap from the user, so batch every command that needs credentials into one block per exec rather than wrapping commands individually. The bundled scripts read the same variables and run the same way, with the export line before the script call.
+
+Multi-org falls out of the naming: each org is its own profile, one block binds one org, and a cross-org task (for example a migration) reads in one exec and writes in another. A profile holding the full `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT` triple also works - the exec injects all three and the export line is unnecessary.
 
 ### az CLI token fallback (no PAT exported)
 
@@ -101,7 +74,7 @@ fi
 
 Stop and instruct the user only when no auth source works (no PAT in either shape, no sequester profile holding the triple, no `ADO_TOKEN`, and `az account show` fails):
 
-> Either run `az login` in your terminal, create a sequester profile holding `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT`, or set the following (outside Claude Code) and start a new session:
+> Either run `az login` in your terminal, create a sequester profile named after your org (`sequester secret set <org> AZURE_DEVOPS_EXT_PAT`), or set the following (outside Claude Code) and start a new session:
 >
 > ```
 > export ADO_ORG=https://dev.azure.com/<org>
@@ -475,34 +448,6 @@ These operations have no `az` CLI support. Use curl with the REST API. See the "
 
 ## Workflow Recipes
 
-### PR Lifecycle
-
-```bash
-# 1. Create PR with auto-complete
-az repos pr create -r my-repo -s feature/foo --title "Add feature" \
-  --auto-complete true --squash true --delete-source-branch true \
-  --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-
-# 2. Check status and policy evaluations
-az repos pr show --id 42 --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-az repos pr policy list --id 42 --org "$ADO_ORG" --detect false
-
-# 3. Requeue failed BVP if needed
-az repos pr policy list --id 42 -o json --org "$ADO_ORG" --detect false  # find eval ID
-az repos pr policy queue --id 42 -e <eval-id> --org "$ADO_ORG" --detect false
-
-# 4. Force-complete if stuck
-az repos pr update --id 42 --status completed --squash true \
-  --delete-source-branch true --bypass-policy true \
-  --org "$ADO_ORG" --detect false
-
-# 5. Abandon if no longer needed
-az repos pr update --id 42 --status abandoned --org "$ADO_ORG" --detect false
-
-# 6. Delete leftover branch
-az repos ref delete --name heads/feature/foo -r my-repo --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-```
-
 ### Debug Failed Pipeline
 
 ```bash
@@ -518,36 +463,6 @@ ${CLAUDE_SKILL_DIR}/scripts/ado-get-logs.sh --run-id 12345 --failed-only
 
 # 4. Drill into specific task
 ${CLAUDE_SKILL_DIR}/scripts/ado-get-logs.sh --run-id 12345 --task "Terraform Plan" --tail 100
-```
-
-### Manage Policies
-
-```bash
-# List policies on a repo (requires repo GUID)
-REPO_ID=$(az repos show -r my-repo --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false --query id -o tsv)
-az repos policy list --repository-id "$REPO_ID" --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-
-# Add BVP
-${CLAUDE_SKILL_DIR}/scripts/ado-create-policy.sh --repo my-repo --type build --pipeline-id 7 --display-name "BVP" --blocking
-
-# Disable temporarily
-az repos policy update --id 5 --enabled false --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-
-# Re-enable
-az repos policy update --id 5 --enabled true --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-
-# Delete
-az repos policy delete --id 5 --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-```
-
-### Manage Variable Groups
-
-```bash
-az pipelines variable-group list --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-az pipelines variable-group show --id 3 --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-az pipelines variable-group variable create --group-id 3 --name TF_STATE_RG --value rg-terraform --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-az pipelines variable-group variable update --group-id 3 --name TF_STATE_RG --new-value rg-terraform-v2 --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-az pipelines variable-group variable delete --group-id 3 --name OLD_VAR --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 ```
 
 ### Manage Environment Checks & Approvals
@@ -648,9 +563,8 @@ az repos pr create -r my-repo -s feature/branch --title "Implement X" \
 az repos pr work-item add --id <PR_ID> --work-items <WI_ID> \
   --org "$ADO_ORG" --detect false
 
-# 7. Add reviewers to PR (use GUIDs from identity fields, not emails - PAT can't resolve emails)
-az repos pr reviewer add --id <PR_ID> --reviewers <REVIEWER1_GUID> <REVIEWER2_GUID> --required true \
-  --org "$ADO_ORG" --detect false
+# 7. Add reviewers - az repos pr reviewer add fails under PAT auth. Use the
+#    REST PUT with a vssps identity GUID (see "Reviewer identity resolution").
 ```
 
 ### Find Team Members for Review
@@ -662,9 +576,9 @@ az devops team list --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false -o table
 # 2. Get members of a team
 az devops team list-member --team "<TeamName>" --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false -o table
 
-# 3. Add as PR reviewer (use member GUID from list-member output - email lookup fails with PAT auth)
-az repos pr reviewer add --id <PR_ID> --reviewers <MEMBER_GUID> \
-  --org "$ADO_ORG" --detect false
+# 3. Add as PR reviewer - az repos pr reviewer add fails under PAT auth. Resolve
+#    the member's email to a vssps identity GUID and use the REST PUT (see
+#    "Reviewer identity resolution").
 ```
 
 ## Troubleshooting
@@ -687,6 +601,32 @@ az boards work-item update --id <NEW_ID> --state Active --assigned-to "me@email.
   --org "$ADO_ORG" --detect false
 ```
 
+### Removing a work item -> PR link no-ops
+
+`az repos pr work-item remove` frequently no-ops on PR ArtifactLinks - it returns success but the link stays. Remove the link from the work-item side instead: find the index of the `ArtifactLink` relation, then remove that relation with a JSON Patch:
+
+```bash
+# 1. Find the relation index (position in .relations[] of the ArtifactLink)
+az boards work-item show --id <WI_ID> --expand relations --org "$ADO_ORG" --detect false -o json
+
+# 2. Remove it (AUTH as set in the Authentication section)
+curl -s -H "$AUTH" -H "Content-Type: application/json-patch+json" -X PATCH \
+  "${ADO_ORG}/_apis/wit/workitems/<WI_ID>?api-version=7.1" \
+  -d '[{"op":"remove","path":"/relations/<idx>"}]'
+```
+
+### Build validation does not start on draft PRs
+
+A build-validation policy evaluation on a draft PR sits `queued` indefinitely - the build starts only when the PR is published. Do not poll the policy status of a freshly created draft. Either skip the gate (it runs on publish) or queue the evaluation explicitly when a green check is wanted up front:
+
+```bash
+eval_id=$(az repos pr policy list --id <PR_ID> --org "$ADO_ORG" --detect false \
+  --query "[?configuration.type.displayName=='Build'].evaluationId | [0]" -o tsv)
+az repos pr policy queue --id <PR_ID> -e "$eval_id" --org "$ADO_ORG" --detect false
+```
+
+A push to an already-queued PR re-triggers the evaluation; only then is polling meaningful.
+
 ## Identity Discovery
 
 At the start of each session that involves assigning work items or adding PR reviewers, resolve the current user's identity:
@@ -703,7 +643,7 @@ Check CLAUDE.md for project-specific ADO configuration (custom work item types, 
 
 When the user asks for an ADO operation:
 
-1. Resolve auth per the Authentication section (PAT, `ADO_TOKEN`, or az login token); instruct the user only if no source works
+1. Resolve auth per the Authentication section (PAT, sequester profile, `ADO_TOKEN`, or az login token); instruct the user only if no source works
 2. Use `az` CLI with `-o json` when parsing programmatically, `-o table` for display
 3. For complex queries, chain commands (e.g., list pipelines -> find ID -> run pipeline)
 4. Use scripts from `${CLAUDE_SKILL_DIR}/scripts/` for: create-policy, get-run, get-logs, pr-threads
