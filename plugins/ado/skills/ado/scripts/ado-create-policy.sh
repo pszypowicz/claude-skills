@@ -42,19 +42,21 @@ REPO="" TYPE="" PIPELINE_ID="" BRANCH="main" DISPLAY_NAME="" BLOCKING=true JSON=
 MIN_APPROVERS=1 CREATOR_VOTE=false RESET_ON_PUSH=true
 REVIEWERS=() FILENAME_PATTERNS=""
 
+missing_value() { log_error "$1 requires a value"; usage >&2; exit 1; }
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo)              REPO="$2"; shift 2 ;;
-    --type)              TYPE="$2"; shift 2 ;;
-    --pipeline-id)       PIPELINE_ID="$2"; shift 2 ;;
-    --min-approvers)     MIN_APPROVERS="$2"; shift 2 ;;
+    --repo)              [[ -n "${2-}" ]] || missing_value "$1"; REPO="$2"; shift 2 ;;
+    --type)              [[ -n "${2-}" ]] || missing_value "$1"; TYPE="$2"; shift 2 ;;
+    --pipeline-id)       [[ -n "${2-}" ]] || missing_value "$1"; PIPELINE_ID="$2"; shift 2 ;;
+    --min-approvers)     [[ -n "${2-}" ]] || missing_value "$1"; MIN_APPROVERS="$2"; shift 2 ;;
     --creator-vote)      CREATOR_VOTE=true; shift ;;
     --reset-on-push)     RESET_ON_PUSH=true; shift ;;
     --no-reset-on-push)  RESET_ON_PUSH=false; shift ;;
-    --reviewer)          REVIEWERS+=("$2"); shift 2 ;;
-    --filename-patterns) FILENAME_PATTERNS="$2"; shift 2 ;;
-    --branch)            BRANCH="$2"; shift 2 ;;
-    --display-name)      DISPLAY_NAME="$2"; shift 2 ;;
+    --reviewer)          [[ -n "${2-}" ]] || missing_value "$1"; REVIEWERS+=("$2"); shift 2 ;;
+    --filename-patterns) [[ -n "${2-}" ]] || missing_value "$1"; FILENAME_PATTERNS="$2"; shift 2 ;;
+    --branch)            [[ -n "${2-}" ]] || missing_value "$1"; BRANCH="$2"; shift 2 ;;
+    --display-name)      [[ -n "${2-}" ]] || missing_value "$1"; DISPLAY_NAME="$2"; shift 2 ;;
     --blocking)          BLOCKING=true; shift ;;
     --no-blocking)       BLOCKING=false; shift ;;
     --json)              JSON=true; shift ;;

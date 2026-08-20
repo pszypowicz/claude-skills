@@ -23,12 +23,14 @@ EOF
 
 RUN_ID="" FAILED_ONLY=false TASK_FILTER="" TAIL=50 JSON=false
 
+missing_value() { log_error "$1 requires a value"; usage >&2; exit 1; }
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --run-id)      RUN_ID="$2"; shift 2 ;;
+    --run-id)      [[ -n "${2-}" ]] || missing_value "$1"; RUN_ID="$2"; shift 2 ;;
     --failed-only) FAILED_ONLY=true; shift ;;
-    --task)        TASK_FILTER="$2"; shift 2 ;;
-    --tail)        TAIL="$2"; shift 2 ;;
+    --task)        [[ -n "${2-}" ]] || missing_value "$1"; TASK_FILTER="$2"; shift 2 ;;
+    --tail)        [[ -n "${2-}" ]] || missing_value "$1"; TAIL="$2"; shift 2 ;;
     --json)        JSON=true; shift ;;
     -h|--help)     usage; exit 0 ;;
     *)             log_error "Unknown flag: $1"; usage >&2; exit 1 ;;
