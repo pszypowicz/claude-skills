@@ -2,15 +2,10 @@
 # Shared ADO REST API client library.
 # Source this file; do not execute directly.
 #
-# Required env vars: ADO_ORG, ADO_PROJECT (or a named <ALIAS>_ADO_* profile,
-#   resolved by ado-profile.sh when the plain triple is not inherited).
+# Required env vars: ADO_ORG, ADO_PROJECT
 # Auth (checked in order): AZURE_DEVOPS_EXT_PAT, ADO_TOKEN, az CLI fallback
 
 set -euo pipefail
-
-# Profile selection helpers (ado_profile / ado_env / ado_with), same directory.
-# shellcheck source=lib/ado-profile.sh
-source "$(dirname "${BASH_SOURCE[0]}")/ado-profile.sh"
 
 _ADO_PROJECT_ID=""
 
@@ -21,18 +16,7 @@ log_error() { printf '[ERROR] %s\n' "$*" >&2; }
 # Call this from the calling script AFTER arg parsing (so --help and usage
 # errors can surface without requiring auth configuration). Idempotent.
 ado_require_env() {
-  # No plain triple inherited but named profiles exist: resolve one (explicit
-  # alias / $ADO_PROFILE / cwd / sole profile) and bind it within THIS process
-  # only. An inherited plain triple is always used unchanged.
-  if [ -z "${ADO_ORG:-}" ]; then
-    local _p
-    if _p="$(ado_profile)" && [ -n "$_p" ]; then
-      ADO_ORG="$(_ado_var "$_p" ORG)"
-      ADO_PROJECT="$(_ado_var "$_p" PROJECT)"
-      AZURE_DEVOPS_EXT_PAT="$(_ado_var "$_p" PAT)"
-    fi
-  fi
-  : "${ADO_ORG:?Set ADO_ORG (e.g. https://dev.azure.com/myorg), or export a <ALIAS>_ADO_ORG/PROJECT/PAT set}"
+  : "${ADO_ORG:?Set ADO_ORG (e.g. https://dev.azure.com/myorg)}"
   : "${ADO_PROJECT:?Set ADO_PROJECT}"
   ADO_ORG="${ADO_ORG%/}"
   export ADO_ORG ADO_PROJECT
