@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/ado-client.sh"
 
 usage() {
-  cat <<EOF >&2
+  cat <<EOF
 Usage:
   ado-create-policy.sh --repo NAME --type build             --pipeline-id ID [OPTIONS]
   ado-create-policy.sh --repo NAME --type approver          [--min-approvers N] [OPTIONS]
@@ -36,40 +36,41 @@ Flags:
   --no-blocking         Policy is advisory only
   --json                Output raw JSON instead of summary
 EOF
-  exit 1
 }
 
 REPO="" TYPE="" PIPELINE_ID="" BRANCH="main" DISPLAY_NAME="" BLOCKING=true JSON=false
 MIN_APPROVERS=1 CREATOR_VOTE=false RESET_ON_PUSH=true
 REVIEWERS=() FILENAME_PATTERNS=""
 
+missing_value() { log_error "$1 requires a value"; usage >&2; exit 1; }
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo)              REPO="$2"; shift 2 ;;
-    --type)              TYPE="$2"; shift 2 ;;
-    --pipeline-id)       PIPELINE_ID="$2"; shift 2 ;;
-    --min-approvers)     MIN_APPROVERS="$2"; shift 2 ;;
+    --repo)              [[ -n "${2-}" ]] || missing_value "$1"; REPO="$2"; shift 2 ;;
+    --type)              [[ -n "${2-}" ]] || missing_value "$1"; TYPE="$2"; shift 2 ;;
+    --pipeline-id)       [[ -n "${2-}" ]] || missing_value "$1"; PIPELINE_ID="$2"; shift 2 ;;
+    --min-approvers)     [[ -n "${2-}" ]] || missing_value "$1"; MIN_APPROVERS="$2"; shift 2 ;;
     --creator-vote)      CREATOR_VOTE=true; shift ;;
     --reset-on-push)     RESET_ON_PUSH=true; shift ;;
     --no-reset-on-push)  RESET_ON_PUSH=false; shift ;;
-    --reviewer)          REVIEWERS+=("$2"); shift 2 ;;
-    --filename-patterns) FILENAME_PATTERNS="$2"; shift 2 ;;
-    --branch)            BRANCH="$2"; shift 2 ;;
-    --display-name)      DISPLAY_NAME="$2"; shift 2 ;;
+    --reviewer)          [[ -n "${2-}" ]] || missing_value "$1"; REVIEWERS+=("$2"); shift 2 ;;
+    --filename-patterns) [[ -n "${2-}" ]] || missing_value "$1"; FILENAME_PATTERNS="$2"; shift 2 ;;
+    --branch)            [[ -n "${2-}" ]] || missing_value "$1"; BRANCH="$2"; shift 2 ;;
+    --display-name)      [[ -n "${2-}" ]] || missing_value "$1"; DISPLAY_NAME="$2"; shift 2 ;;
     --blocking)          BLOCKING=true; shift ;;
     --no-blocking)       BLOCKING=false; shift ;;
     --json)              JSON=true; shift ;;
-    -h|--help)           usage ;;
-    *)                   log_error "Unknown flag: $1"; usage ;;
+    -h|--help)           usage; exit 0 ;;
+    *)                   log_error "Unknown flag: $1"; usage >&2; exit 1 ;;
   esac
 done
 
-[[ -z "$REPO" ]] && { log_error "--repo is required"; usage; }
-[[ -z "$TYPE" ]] && { log_error "--type is required"; usage; }
+[[ -z "$REPO" ]] && { log_error "--repo is required"; usage >&2; exit 1; }
+[[ -z "$TYPE" ]] && { log_error "--type is required"; usage >&2; exit 1; }
 [[ "$TYPE" != "build" && "$TYPE" != "approver" && "$TYPE" != "required-reviewer" ]] && \
-  { log_error "--type must be 'build', 'approver', or 'required-reviewer'"; usage; }
-[[ "$TYPE" == "build" && -z "$PIPELINE_ID" ]] && { log_error "--pipeline-id is required for build type"; usage; }
-[[ "$TYPE" == "required-reviewer" && ${#REVIEWERS[@]} -eq 0 ]] && { log_error "--reviewer is required for required-reviewer type"; usage; }
+  { log_error "--type must be 'build', 'approver', or 'required-reviewer'"; usage >&2; exit 1; }
+[[ "$TYPE" == "build" && -z "$PIPELINE_ID" ]] && { log_error "--pipeline-id is required for build type"; usage >&2; exit 1; }
+[[ "$TYPE" == "required-reviewer" && ${#REVIEWERS[@]} -eq 0 ]] && { log_error "--reviewer is required for required-reviewer type"; usage >&2; exit 1; }
 
 ado_require_env
 
