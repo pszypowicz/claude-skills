@@ -16,8 +16,13 @@ log_error() { printf '[ERROR] %s\n' "$*" >&2; }
 # Call this from the calling script AFTER arg parsing (so --help and usage
 # errors can surface without requiring auth configuration). Idempotent.
 ado_require_env() {
-  : "${ADO_ORG:?Set ADO_ORG (e.g. https://dev.azure.com/myorg)}"
-  : "${ADO_PROJECT:?Set ADO_PROJECT}"
+  local missing=""
+  [[ -n "${ADO_ORG:-}" ]] || missing="ADO_ORG"
+  [[ -n "${ADO_PROJECT:-}" ]] || missing="${missing:+$missing }ADO_PROJECT"
+  if [[ -n "$missing" ]]; then
+    log_error "Missing: ${missing}. Export ADO_ORG (e.g. https://dev.azure.com/myorg) and ADO_PROJECT, or wrap the command in: sequester env exec <org> -- bash -c 'export ADO_ORG=... ADO_PROJECT=...; <command>'"
+    return 1
+  fi
   ADO_ORG="${ADO_ORG%/}"
   export ADO_ORG ADO_PROJECT
   if [ -n "${AZURE_DEVOPS_EXT_PAT:-}" ]; then
