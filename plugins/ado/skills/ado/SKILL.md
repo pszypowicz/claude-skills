@@ -33,17 +33,20 @@ az account show --query user.name -o tsv 2>/dev/null || echo "az: not logged in"
 
 ### Sequester profiles (nothing exported)
 
-When no credential env vars are inherited and the `sequester` CLI is on PATH, read the triple from a sequester secrets profile per command block. `sequester secret list` prints profile names and their variable names without prompting - pick the profile holding `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT` (project CLAUDE.md may name the one to use; ask the user if several match). Wrap the block so the values exist only in the child process:
+When no credential env vars are inherited and the `sequester` CLI is on PATH, read the PAT from a sequester secrets profile per command block. The convention is one profile per org, named as the org URL segment (the `<org>` in `https://dev.azure.com/<org>`), holding a single `AZURE_DEVOPS_EXT_PAT` - PATs are org-scoped, so the org identifies both the profile and the token. `sequester secret list` prints profile names and their variable names without prompting.
+
+`ADO_ORG` and `ADO_PROJECT` are not secrets. Derive them from the clone path (`.../dev.azure.com/<org>/<project>/...`) or the repo remote, and set them inside the wrapped block - the profile supplies only the PAT:
 
 ```bash
-sequester env exec <PROFILE> -- bash -c '
+sequester env exec <org> -- bash -c '
+  export ADO_ORG=https://dev.azure.com/<org> ADO_PROJECT=<project>
   az repos pr list -r <repo> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 '
 ```
 
-Single-quote the block so `$ADO_ORG` expands inside the child, not the calling shell. Each `env exec` is one profile read and may require a Touch ID tap from the user, so batch every command that needs credentials into one block per exec rather than wrapping commands individually. The bundled scripts run the same way: `sequester env exec <PROFILE> -- ${CLAUDE_SKILL_DIR}/scripts/ado-pr-threads.sh ...`.
+Single-quote the block so the PAT never touches the calling shell. Each `env exec` is one profile read and may require a Touch ID tap from the user, so batch every command that needs credentials into one block per exec rather than wrapping commands individually. The bundled scripts read the same variables and run the same way, with the export line before the script call.
 
-Sequester profiles are also the multi-org path: each org is its own profile, selected per block by the working directory or by name. One block binds one org, so a cross-org task (for example a migration) reads in one exec and writes in another.
+Multi-org falls out of the naming: each org is its own profile, one block binds one org, and a cross-org task (for example a migration) reads in one exec and writes in another. A profile holding the full `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT` triple also works - the exec injects all three and the export line is unnecessary.
 
 ### az CLI token fallback (no PAT exported)
 
@@ -71,7 +74,7 @@ fi
 
 Stop and instruct the user only when no auth source works (no PAT in either shape, no sequester profile holding the triple, no `ADO_TOKEN`, and `az account show` fails):
 
-> Either run `az login` in your terminal, create a sequester profile holding `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT`, or set the following (outside Claude Code) and start a new session:
+> Either run `az login` in your terminal, create a sequester profile named after your org (`sequester secret set <org> AZURE_DEVOPS_EXT_PAT`), or set the following (outside Claude Code) and start a new session:
 >
 > ```
 > export ADO_ORG=https://dev.azure.com/<org>
