@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/ado-client.sh"
 
 usage() {
-  cat <<EOF >&2
+  cat <<EOF
 Usage:
   ado-create-policy.sh --repo NAME --type build             --pipeline-id ID [OPTIONS]
   ado-create-policy.sh --repo NAME --type approver          [--min-approvers N] [OPTIONS]
@@ -36,7 +36,6 @@ Flags:
   --no-blocking         Policy is advisory only
   --json                Output raw JSON instead of summary
 EOF
-  exit 1
 }
 
 REPO="" TYPE="" PIPELINE_ID="" BRANCH="main" DISPLAY_NAME="" BLOCKING=true JSON=false
@@ -59,17 +58,17 @@ while [[ $# -gt 0 ]]; do
     --blocking)          BLOCKING=true; shift ;;
     --no-blocking)       BLOCKING=false; shift ;;
     --json)              JSON=true; shift ;;
-    -h|--help)           usage ;;
-    *)                   log_error "Unknown flag: $1"; usage ;;
+    -h|--help)           usage; exit 0 ;;
+    *)                   log_error "Unknown flag: $1"; usage >&2; exit 1 ;;
   esac
 done
 
-[[ -z "$REPO" ]] && { log_error "--repo is required"; usage; }
-[[ -z "$TYPE" ]] && { log_error "--type is required"; usage; }
+[[ -z "$REPO" ]] && { log_error "--repo is required"; usage >&2; exit 1; }
+[[ -z "$TYPE" ]] && { log_error "--type is required"; usage >&2; exit 1; }
 [[ "$TYPE" != "build" && "$TYPE" != "approver" && "$TYPE" != "required-reviewer" ]] && \
-  { log_error "--type must be 'build', 'approver', or 'required-reviewer'"; usage; }
-[[ "$TYPE" == "build" && -z "$PIPELINE_ID" ]] && { log_error "--pipeline-id is required for build type"; usage; }
-[[ "$TYPE" == "required-reviewer" && ${#REVIEWERS[@]} -eq 0 ]] && { log_error "--reviewer is required for required-reviewer type"; usage; }
+  { log_error "--type must be 'build', 'approver', or 'required-reviewer'"; usage >&2; exit 1; }
+[[ "$TYPE" == "build" && -z "$PIPELINE_ID" ]] && { log_error "--pipeline-id is required for build type"; usage >&2; exit 1; }
+[[ "$TYPE" == "required-reviewer" && ${#REVIEWERS[@]} -eq 0 ]] && { log_error "--reviewer is required for required-reviewer type"; usage >&2; exit 1; }
 
 ado_require_env
 

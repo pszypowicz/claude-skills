@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/ado-client.sh"
 
 usage() {
-  cat <<EOF >&2
+  cat <<EOF
 Usage: ado-get-logs.sh --run-id ID [--failed-only] [--task NAME] [--tail N] [--json]
 
 Fetch task log output from a pipeline run, with filtering.
@@ -19,7 +19,6 @@ Flags:
   --tail N          Show only last N lines per task log (default: 50)
   --json            Output JSON array of {task, result, log_id, lines[]}
 EOF
-  exit 1
 }
 
 RUN_ID="" FAILED_ONLY=false TASK_FILTER="" TAIL=50 JSON=false
@@ -31,12 +30,12 @@ while [[ $# -gt 0 ]]; do
     --task)        TASK_FILTER="$2"; shift 2 ;;
     --tail)        TAIL="$2"; shift 2 ;;
     --json)        JSON=true; shift ;;
-    -h|--help)     usage ;;
-    *)             log_error "Unknown flag: $1"; usage ;;
+    -h|--help)     usage; exit 0 ;;
+    *)             log_error "Unknown flag: $1"; usage >&2; exit 1 ;;
   esac
 done
 
-[[ -z "$RUN_ID" ]] && { log_error "--run-id is required"; usage; }
+[[ -z "$RUN_ID" ]] && { log_error "--run-id is required"; usage >&2; exit 1; }
 
 ado_require_env
 
