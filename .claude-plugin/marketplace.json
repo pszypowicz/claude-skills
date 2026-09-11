@@ -41,6 +41,13 @@
       "description": "Batch-provision git worktrees for planned work across multiple repos, plus status/lookup/teardown slash commands.",
       "version": "1.0.0",
       "tags": ["git", "worktrees", "workflow", "project-kickoff"]
+    },
+    {
+      "name": "house-style",
+      "source": "./plugins/house-style",
+      "description": "Flag house-style violations in written prose and in commit messages: em dashes, non-ASCII bytes in PowerShell files, buzzwords, and filler phrases.",
+      "version": "1.0.0",
+      "tags": ["writing", "prose", "linting", "hooks", "commit-messages", "style"]
     }
   ]
 }
