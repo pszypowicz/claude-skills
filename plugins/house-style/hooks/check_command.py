@@ -21,15 +21,21 @@ FILE_FLAGS = {"-F", "--file", "--body-file"}
 BREAKS = {"&&", "||", ";", "|", "&"}
 BREAK_CHARS = "".join(sorted({char for token in BREAKS for char in token}))
 HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?")
+# Stands in for a heredoc body that was cut out, so the command that owned the
+# body can still be identified once the line is tokenized.
+BODY_MARK = "__HS_BODY_{}__"
+BODY_PATTERN = re.compile(BODY_MARK.format(r"(\d+)"))
 
 
 def strip_heredocs(command):
     """Return the command with each heredoc body cut out, and the extracted bodies.
 
-    A heredoc body is not shell syntax: it can hold an unbalanced quote (an
+    A heredoc body is not shell syntax. It can hold an unbalanced quote (an
     apostrophe in prose) that would otherwise make shlex.split raise on the
     whole command. Removing the bodies before tokenizing keeps the outer
-    command parseable; the bodies are scanned separately as raw text.
+    command parseable, and the bodies are scanned separately as raw text. Each
+    body leaves a BODY_MARK placeholder behind, which keeps its position in the
+    command available to the tokenized pass.
     """
     bodies = []
     out = []
@@ -50,10 +56,10 @@ def strip_heredocs(command):
         else:
             body = after
             end = len(command)
+        out.append(" {} ".format(BODY_MARK.format(len(bodies))))
         # The body starts at the newline that ends the opener line, so drop
         # that newline to keep the reported line numbers those of the text.
         bodies.append(body[1:] if body.startswith("\n") else body)
-        out.append(" ")
         pos = end
     out.append(command[pos:])
     return "".join(out), bodies
@@ -127,19 +133,42 @@ def split_short_option(token, flags):
     return None
 
 
+def owned_bodies(tokens, bodies):
+    """Return the heredoc bodies that belong to a git or gh command.
+
+    A heredoc body counts as a message wherever it appears under git or gh,
+    rather than only as the value of a file flag. The usual way to pass a
+    multi-line message is `--body "$(cat <<'EOF' ... EOF)"`, where the flag's
+    own value tokenizes to the command substitution rather than to the text.
+    Matching on the placeholder inside the token covers that form and still
+    leaves a heredoc that another command owns, such as a `cat` writing a
+    source file next to a `git add`, out of the messages.
+    """
+    found = []
+    active = None
+    for token in tokens:
+        if token in BREAKS:
+            active = None
+            continue
+        basename = os.path.basename(token)
+        if basename in ("git", "gh"):
+            active = basename
+            continue
+        if not active:
+            continue
+        for match in BODY_PATTERN.finditer(token):
+            position = int(match.group(1))
+            if position < len(bodies):
+                found.append(bodies[position])
+    return found
+
+
 def messages(command):
     """Return every message string that the command hands to git or gh.
 
     The value flags are keyed by tool, not merged into one flat set: -m
     means something to git and nothing to gh, -b/-t/-n mean something to gh
     and nothing to git, so the active tool decides which set applies.
-
-    A heredoc body counts as a message whenever the command runs git or gh at
-    all. The usual way to pass a multi-line message is
-    `--body "$(cat <<'EOF' ... EOF)"`, where the flag's own value tokenizes to
-    the command substitution rather than to the text, so tying the body to a
-    file flag would miss it. The cost is that a heredoc fed to some other
-    command in the same compound line is scanned too.
     """
     stripped, bodies = strip_heredocs(command)
     try:
@@ -148,7 +177,6 @@ def messages(command):
         return []
     found = []
     active = None
-    used_tool = False
     index = 0
     while index < len(tokens):
         token = tokens[index]
@@ -159,7 +187,6 @@ def messages(command):
         basename = os.path.basename(token)
         if basename in ("git", "gh"):
             active = basename
-            used_tool = True
             index += 1
             continue
         value_flags = VALUE_FLAGS.get(active, set())
@@ -184,8 +211,7 @@ def messages(command):
         if active and sign and name in value_flags:
             found.append(inline)
         index += 1
-    if used_tool:
-        found.extend(bodies)
+    found.extend(owned_bodies(tokens, bodies))
     return found
 
 

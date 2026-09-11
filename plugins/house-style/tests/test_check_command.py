@@ -211,6 +211,14 @@ class TestAllow(unittest.TestCase):
         command = "cat <<EOF > notes.md\nwe delve into it\nEOF"
         self.assertEqual(decide(command)["permissionDecision"], "allow")
 
+    def test_python_heredoc_another_command_owns(self):
+        command = "cat <<'PY' > run.py\nif task.cancelled:\nPY\ngit add run.py"
+        self.assertEqual(decide(command)["permissionDecision"], "allow")
+
+    def test_sql_heredoc_another_command_owns(self):
+        command = "cat <<'SQL' > q.sql\nSELECT 1; -- get one row\nSQL\ngit add q.sql"
+        self.assertEqual(decide(command)["permissionDecision"], "allow")
+
     def test_clustered_short_flags_without_a_message_flag(self):
         out = decide('git log -np "we delve into it"')
         self.assertEqual(out["permissionDecision"], "allow")
