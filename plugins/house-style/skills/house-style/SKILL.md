@@ -43,6 +43,10 @@ Good: "The build failed because the cache was stale."
 
 Use "and", "but", "because", "although", or "so".
 
+## Prefer plain words
+
+In running prose, "for example" reads better than the abbreviation.
+
 ## How to run the audit
 
 Read the draft once for each pattern. Rewrite every hit. Then read the draft aloud in your head. A sentence you cannot say in one breath needs a split.

@@ -140,32 +140,43 @@ class TestDefaultRules(unittest.TestCase):
             self.assertNotIn(EM_DASH.encode("utf-8"), handle.read())
 
 
-# One must-match and one plausible must-not-match string per shipped word
-# rule, keyed by the rule's own pattern so the table stays tied to the rule
-# it describes rather than to its position in the list.
+DOUBLE_DASH = r"(?:^|(?<=[\s(\[]))(?<!\]\()[^\s#/()\[\]]*\w--\w|\s--\s(?!\s*-)"
+
+# The must-match and must-not-match strings for each shipped word rule, keyed
+# by the rule's own pattern so the table stays tied to the rule it describes
+# rather than to its position in the list.
 WORD_RULE_CASES = {
-    r"\bload-bearing\b": ("a load-bearing claim", "load bearing wall"),
-    r"\bsmoking gun\b": ("found the smoking gun in the drawer", "smoking a cigarette outdoors"),
+    r"\bload-bearing\b": (["a load-bearing claim"], ["load bearing wall"]),
+    r"\bsmoking gun\b": (
+        ["found the smoking gun in the drawer"],
+        ["smoking a cigarette outdoors"],
+    ),
     r"\bstated fairly\b": (
-        "it can be stated fairly that this works",
-        "a fair statement of the facts",
+        ["it can be stated fairly that this works"],
+        ["a fair statement of the facts"],
     ),
-    r"\bleverage[sd]?\b": ("we leveraged the connections", "we are leveraging the connections"),
-    r"\butiliz(e|es|ed)\b": ("we utilized the resources", "utilizing the resources"),
-    r"\bin order to\b": ("in order to finish", "in order for this to work"),
-    r"\bprior to\b": ("prior to the meeting", "the prior year"),
-    r"\bin the event that\b": ("in the event that it fails", "in the event of rain"),
-    r"(?<![\w.])e\.g\.": ("for example, e.g. this one", "the file.e.g. backup"),
-    r"\bdelve[sd]?\b": ("let's delve into the details", "delving into the details"),
-    r"\bseamless(ly)?\b": ("a seamless integration", "a seamed edge"),
+    r"\bleverage[sd]?\b": (["we leveraged the connections"], ["pull the lever again"]),
+    r"\butiliz(e|es|ed)\b": (["we utilized the resources"], ["run the utility script"]),
+    r"\bin order to\b": (["in order to finish"], ["in order for this to work"]),
+    r"\bprior to\b": (["prior to the meeting"], ["the prior year"]),
+    r"\bin the event that\b": (["in the event that it fails"], ["in the event of rain"]),
+    r"\bdelve[sd]?\b": (["let's delve into the details"], ["twelve open items"]),
+    r"\bseamless(ly)?\b": (["a seamless integration"], ["a seamed edge"]),
     r"\b(colour|initialise|licence|cancelled)\b": (
-        "check the colour scheme",
-        "check the color scheme",
+        ["check the colour scheme"],
+        ["check the color scheme"],
     ),
-    r"\w--\w|\s--\s": ("a well--known fact", "gh pr create --draft"),
+    DOUBLE_DASH: (
+        ["a well--known fact", "The build failed -- the cache was stale."],
+        [
+            "gh pr create --draft",
+            "[@MainActor](#global-actors--mainactor)",
+            "Run npm test -- --coverage first.",
+        ],
+    ),
     r"\b(a|the) (maintainer|reviewer|maintainers|reviewers)\b|\bthe team\b": (
-        "ask the maintainer for advice",
-        "ask a colleague for advice",
+        ["ask the maintainer for advice"],
+        ["ask a colleague for advice"],
     ),
 }
 
@@ -179,16 +190,19 @@ class TestShippedWordRules(unittest.TestCase):
         for rule in engine.load_rules(user_path="")["words"]:
             should_match, should_not_match = WORD_RULE_CASES[rule["match"]]
             single = {"skip": [], "characters": [], "words": [rule]}
-            with self.subTest(pattern=rule["match"]):
-                self.assertTrue(
-                    engine.scan_message(should_match, single),
-                    "expected a match for {!r}".format(should_match),
-                )
-                self.assertEqual(
-                    engine.scan_message(should_not_match, single),
-                    [],
-                    "expected no match for {!r}".format(should_not_match),
-                )
+            for text in should_match:
+                with self.subTest(pattern=rule["match"], text=text):
+                    self.assertTrue(
+                        engine.scan_message(text, single),
+                        "expected a match for {!r}".format(text),
+                    )
+            for text in should_not_match:
+                with self.subTest(pattern=rule["match"], text=text):
+                    self.assertEqual(
+                        engine.scan_message(text, single),
+                        [],
+                        "expected no match for {!r}".format(text),
+                    )
 
 
 class TestUserRulesPath(unittest.TestCase):

@@ -32,10 +32,6 @@
     { "match": "\\bprior to\\b", "message": "Write \"before\"." },
     { "match": "\\bin the event that\\b", "message": "Write \"if\"." },
     {
-      "match": "(?<![\\w.])e\\.g\\.",
-      "message": "Write \"for example\"."
-    },
-    {
       "match": "\\bdelve[sd]?\\b",
       "message": "Write \"read\" or \"examine\"."
     },
@@ -48,7 +44,7 @@
       "message": "British spelling. Use American English."
     },
     {
-      "match": "\\w--\\w|\\s--\\s",
+      "match": "(?:^|(?<=[\\s(\\[]))(?<!\\]\\()[^\\s#/()\\[\\]]*\\w--\\w|\\s--\\s(?!\\s*-)",
       "message": "Double dash as prose punctuation. Use a single - with spaces.",
       "raw": true
     },
