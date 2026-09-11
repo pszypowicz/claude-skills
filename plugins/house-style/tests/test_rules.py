@@ -155,12 +155,21 @@ WORD_RULE_CASES = {
         ["it can be stated fairly that this works"],
         ["a fair statement of the facts"],
     ),
-    r"\bleverage[sd]?\b": (["we leveraged the connections"], ["pull the lever again"]),
-    r"\butiliz(e|es|ed)\b": (["we utilized the resources"], ["run the utility script"]),
+    r"\bleverag(e[sd]?|ing)\b": (
+        ["we leveraged the connections", "we are leveraging the connections"],
+        ["pull the lever again"],
+    ),
+    r"\butiliz(e|es|ed|ing)\b": (
+        ["we utilized the resources", "utilizing the resources"],
+        ["run the utility script"],
+    ),
     r"\bin order to\b": (["in order to finish"], ["in order for this to work"]),
     r"\bprior to\b": (["prior to the meeting"], ["the prior year"]),
     r"\bin the event that\b": (["in the event that it fails"], ["in the event of rain"]),
-    r"\bdelve[sd]?\b": (["let's delve into the details"], ["twelve open items"]),
+    r"\bdelv(e[sd]?|ing)\b": (
+        ["let's delve into the details", "delving into the details"],
+        ["twelve open items"],
+    ),
     r"\bseamless(ly)?\b": (["a seamless integration"], ["a seamed edge"]),
     r"\b(colour|initialise|licence|cancelled)\b": (
         ["check the colour scheme"],
