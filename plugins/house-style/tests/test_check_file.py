@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -10,16 +11,29 @@ import unittest
 PLUGIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(PLUGIN, "hooks", "check_file.py")
 EM_DASH = chr(0x2014)
+CONFIG = tempfile.mkdtemp(prefix="house-style-config-")
 
 
-def run(path):
-    payload = json.dumps({"tool_input": {"file_path": path}})
+def tearDownModule():
+    shutil.rmtree(CONFIG, ignore_errors=True)
+
+
+def invoke(payload, config_dir=None):
+    """Run the hook with a config directory the test owns.
+
+    The hook reads its optional user rules from CLAUDE_CONFIG_DIR. Inheriting
+    the ambient one makes the outcome depend on whatever file the developer
+    happens to have there.
+    """
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = config_dir or CONFIG
     return subprocess.run(
-        [sys.executable, HOOK],
-        input=payload,
-        capture_output=True,
-        text=True,
+        [sys.executable, HOOK], input=payload, capture_output=True, text=True, env=env
     )
+
+
+def run(path, config_dir=None):
+    return invoke(json.dumps({"tool_input": {"file_path": path}}), config_dir)
 
 
 def written(name, body):
@@ -95,15 +109,11 @@ class TestCheckFile(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
     def test_empty_payload_passes(self):
-        result = subprocess.run(
-            [sys.executable, HOOK], input="{}", capture_output=True, text=True
-        )
+        result = invoke("{}")
         self.assertEqual(result.returncode, 0)
 
     def test_broken_payload_passes(self):
-        result = subprocess.run(
-            [sys.executable, HOOK], input="not json", capture_output=True, text=True
-        )
+        result = invoke("not json")
         self.assertEqual(result.returncode, 0)
 
     def test_skip_glob_passes(self):
@@ -115,27 +125,35 @@ class TestCheckFile(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
     def test_tool_input_wrong_shape_passes(self):
-        result = subprocess.run(
-            [sys.executable, HOOK],
-            input=json.dumps({"tool_input": "x"}),
-            capture_output=True,
-            text=True,
-        )
+        result = invoke(json.dumps({"tool_input": "x"}))
         self.assertEqual(result.returncode, 0)
 
     def test_top_level_list_passes(self):
-        result = subprocess.run(
-            [sys.executable, HOOK], input="[]", capture_output=True, text=True
-        )
+        result = invoke("[]")
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
 
     def test_top_level_null_passes(self):
-        result = subprocess.run(
-            [sys.executable, HOOK], input="null", capture_output=True, text=True
-        )
+        result = invoke("null")
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
+
+    def test_a_broken_user_rules_file_leaves_the_shipped_rules_working(self):
+        config = tempfile.mkdtemp(prefix="house-style-broken-")
+        self.addCleanup(shutil.rmtree, config, True)
+        with open(os.path.join(config, "house-style.json"), "w", encoding="utf-8") as handle:
+            handle.write("{")
+        result = run(self.make(".md", "a load-bearing claim\n"), config_dir=config)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Buzzword", result.stderr)
+
+    def test_a_broken_user_rules_file_still_passes_clean_prose(self):
+        config = tempfile.mkdtemp(prefix="house-style-broken-")
+        self.addCleanup(shutil.rmtree, config, True)
+        with open(os.path.join(config, "house-style.json"), "w", encoding="utf-8") as handle:
+            handle.write('{"words": "nope"}')
+        result = run(self.make(".md", "A plain sentence.\n"), config_dir=config)
+        self.assertEqual(result.returncode, 0)
 
     def test_output_pins_the_exact_shape(self):
         path = self.make(".md", "A clean line.\nThis is a load-bearing claim.\n")

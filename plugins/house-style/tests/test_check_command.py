@@ -2,27 +2,41 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 PLUGIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(PLUGIN, "hooks", "check_command.py")
+CONFIG = tempfile.mkdtemp(prefix="house-style-config-")
 
 
-def decide(command):
-    payload = json.dumps({"tool_input": {"command": command}})
-    result = subprocess.run(
-        [sys.executable, HOOK], input=payload, capture_output=True, text=True
+def tearDownModule():
+    shutil.rmtree(CONFIG, ignore_errors=True)
+
+
+def invoke(payload, config_dir=None):
+    """Run the hook with a config directory the test owns.
+
+    The hook reads its optional user rules from CLAUDE_CONFIG_DIR. Inheriting
+    the ambient one makes the outcome depend on whatever file the developer
+    happens to have there.
+    """
+    env = dict(os.environ)
+    env["CLAUDE_CONFIG_DIR"] = config_dir or CONFIG
+    return subprocess.run(
+        [sys.executable, HOOK], input=payload, capture_output=True, text=True, env=env
     )
-    assert result.returncode == 0, result.stderr
-    return json.loads(result.stdout)["hookSpecificOutput"]
 
 
-def decide_raw(payload):
-    result = subprocess.run(
-        [sys.executable, HOOK], input=payload, capture_output=True, text=True
-    )
+def decide(command, config_dir=None):
+    return decide_raw(json.dumps({"tool_input": {"command": command}}), config_dir)
+
+
+def decide_raw(payload, config_dir=None):
+    result = invoke(payload, config_dir)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)["hookSpecificOutput"]
 
@@ -199,6 +213,25 @@ class TestAllow(unittest.TestCase):
 
     def test_clustered_short_flags_without_a_message_flag(self):
         out = decide('git log -np "we delve into it"')
+        self.assertEqual(out["permissionDecision"], "allow")
+
+
+class TestBrokenUserRulesFile(unittest.TestCase):
+    def setUp(self):
+        self.config = tempfile.mkdtemp(prefix="house-style-broken-")
+        path = os.path.join(self.config, "house-style.json")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write("{")
+
+    def tearDown(self):
+        shutil.rmtree(self.config, ignore_errors=True)
+
+    def test_the_shipped_rules_still_deny(self):
+        out = decide('git commit -m "a load-bearing claim"', config_dir=self.config)
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_a_clean_command_is_still_allowed(self):
+        out = decide('git commit -m "Add the cache eviction path"', config_dir=self.config)
         self.assertEqual(out["permissionDecision"], "allow")
 
 
