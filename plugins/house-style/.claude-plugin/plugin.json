@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "house-style",
+  "description": "Flag house-style violations in written prose and in commit messages: em dashes, non-ASCII bytes in PowerShell files, buzzwords, and filler phrases. Ships a default word list and merges an optional user list.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Przemyslaw Szypowicz"
+  }
+}

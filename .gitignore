@@ -7,6 +7,10 @@ plans/
 # Claude Code local settings (personal, not portable)
 .claude/
 
+# Python bytecode
+__pycache__/
+*.pyc
+
 # OS
 .DS_Store
 
