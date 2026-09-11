@@ -20,6 +20,7 @@ Once added, `/plugin` lists everything the marketplace offers. The marketplace i
 | [`modern-swift`](plugins/modern-swift/skills/modern-swift/SKILL.md)                | 1.0.0   | Swift language features beyond concurrency: attributes (`@available`, `@discardableResult`, `@frozen`, `@inlinable`, `@backDeployed`, `@resultBuilder`, `@propertyWrapper`) and macro usage (`#Preview`, custom macros). |
 | [`go-dev`](plugins/go-dev/skills/go-dev/SKILL.md)                                  | 1.0.0   | Go development with a toolchain-first verification workflow: writing, testing, debugging, profiling, and dependency management.                                                                                          |
 | [`worktrees`](plugins/worktrees/skills/start-project/SKILL.md)                     | 1.0.0   | Batch-provision git worktrees for planned work across multiple repos, plus `/worktree-status`, `/worktree-for`, `/worktree-cleanup` slash commands.                                                                      |
+| [`house-style`](plugins/house-style/skills/house-style/SKILL.md)                   | 1.0.0   | Flag house-style violations in written prose and in git and gh message text: em dashes, non-ASCII bytes in PowerShell files, buzzwords, and filler phrases. Ships a word list and merges an optional user list.          |
 
 ## Layout
 
@@ -31,6 +32,9 @@ plugins/<name>/
   skills/<skill>/references/       # supporting reference material
   skills/<skill>/scripts/          # bundled shell scripts, where applicable
   commands/                        # slash commands, where applicable
+  hooks/                           # hook scripts and hooks.json, where applicable
+  rules/                           # data files the hooks read, where applicable
+  tests/                           # test suites for bundled scripts, where applicable
 ```
 
 ## License
