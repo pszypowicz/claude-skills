@@ -1,5 +1,7 @@
 """Tests for the house-style rule engine."""
 
+import contextlib
+import io
 import json
 import os
 import sys
@@ -55,6 +57,86 @@ class TestMerge(unittest.TestCase):
             self.assertIn("moo", [rule["match"] for rule in loaded["words"]])
         finally:
             os.unlink(path)
+
+
+class TestBrokenUserRules(unittest.TestCase):
+    """Every shape here once raised out of both hooks on every call."""
+
+    def load(self, body):
+        handle = tempfile.NamedTemporaryFile(
+            "w", suffix=".json", delete=False, encoding="utf-8"
+        )
+        handle.write(body)
+        handle.close()
+        try:
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                loaded = engine.load_rules(user_path=handle.name)
+            return loaded, stderr.getvalue(), handle.name
+        finally:
+            os.unlink(handle.name)
+
+    def assert_usable(self, loaded, warning, path):
+        self.assertTrue(loaded["words"])
+        self.assertTrue(loaded["characters"])
+        self.assertTrue(engine.scan_message("a load-bearing claim", loaded))
+        self.assertIn(os.path.basename(path), warning)
+        self.assertEqual(len(warning.strip().splitlines()), 1)
+
+    def test_empty_file(self):
+        self.assert_usable(*self.load(""))
+
+    def test_truncated_object(self):
+        self.assert_usable(*self.load("{"))
+
+    def test_top_level_list(self):
+        self.assert_usable(*self.load("[]"))
+
+    def test_rule_without_a_match(self):
+        loaded, warning, path = self.load('{"words": [{"message": "No."}]}')
+        self.assert_usable(loaded, warning, path)
+        self.assertEqual(len(loaded["words"]), len(engine.load_rules(user_path="")["words"]))
+
+    def test_pattern_that_does_not_compile(self):
+        loaded, warning, path = self.load(
+            '{"words": [{"match": "(unclosed", "message": "No."}]}'
+        )
+        self.assert_usable(loaded, warning, path)
+        self.assertNotIn("(unclosed", [rule["match"] for rule in loaded["words"]])
+
+    def test_words_is_not_a_list(self):
+        self.assert_usable(*self.load('{"words": "nope"}'))
+
+    def test_a_sound_rule_survives_a_broken_neighbor(self):
+        loaded, _, _ = self.load(
+            '{"words": [{"match": "(unclosed", "message": "No."}, '
+            '{"match": "moo", "message": "No."}]}'
+        )
+        self.assertIn("moo", [rule["match"] for rule in loaded["words"]])
+
+    def test_a_rule_without_a_message_still_reports(self):
+        loaded, _, _ = self.load('{"words": [{"match": "moo"}]}')
+        self.assertTrue(engine.scan_message("moo", loaded))
+
+
+def character_rules(files):
+    return {
+        "skip": [],
+        "characters": [{"match": "x", "message": "No x.", "files": files}],
+        "words": [],
+    }
+
+
+class TestFileGlobs(unittest.TestCase):
+    def test_a_comma_joined_string(self):
+        rules = character_rules("*.ps1,*.psm1")
+        self.assertEqual(len(engine.scan_file("x\n", rules, "/tmp/a.psm1")), 1)
+        self.assertEqual(engine.scan_file("x\n", rules, "/tmp/a.md"), [])
+
+    def test_a_json_array(self):
+        rules = character_rules(["*.ps1", "*.psm1"])
+        self.assertEqual(len(engine.scan_file("x\n", rules, "/tmp/a.psm1")), 1)
+        self.assertEqual(engine.scan_file("x\n", rules, "/tmp/a.md"), [])
 
 
 class TestScanFile(unittest.TestCase):
