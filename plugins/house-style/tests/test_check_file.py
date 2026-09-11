@@ -155,6 +155,27 @@ class TestCheckFile(unittest.TestCase):
         self.assertNotIn("smoking gun", result.stderr)
         self.assertNotIn(":1:", result.stderr)
 
+    def test_an_edit_of_part_of_a_line_reports_the_line(self):
+        path = self.make(".md", "This sentence has a load-bearing claim inside it.\n")
+        result = run(path, new_string="a load-bearing claim")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Buzzword", result.stderr)
+        self.assertIn(":1:", result.stderr)
+
+    def test_an_edit_inside_a_long_line_leaves_the_other_lines_alone(self):
+        body = (
+            "an old smoking gun line\n"
+            "Everything before the claim, a load-bearing claim, and a tail after it.\n"
+            "another old smoking gun line\n"
+        )
+        path = self.make(".md", body)
+        result = run(path, new_string="a load-bearing claim,")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(":2:", result.stderr)
+        self.assertNotIn(":1:", result.stderr)
+        self.assertNotIn(":3:", result.stderr)
+        self.assertNotIn("smoking gun", result.stderr)
+
     def test_a_payload_with_neither_field_reports_the_whole_file(self):
         path = self.make(".md", "an old smoking gun line\na load-bearing claim\n")
         result = run(path)

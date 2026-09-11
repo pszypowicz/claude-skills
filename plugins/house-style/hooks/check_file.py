@@ -13,16 +13,17 @@ import rules as engine  # noqa: E402
 NEW_TEXT_FIELDS = ("content", "new_string")
 
 
-def introduced_lines(tool_input):
-    """Return the lines this edit adds, or None when the payload does not say.
+def introduced_text(tool_input):
+    """Return the text fragments this edit adds, or None when the payload does not say.
 
     Write carries the whole new file in content and Edit carries only the
-    replacement in new_string.
+    replacement in new_string. A blank fragment is dropped, since every line
+    contains it and keeping it would match the whole file.
     """
     for field in NEW_TEXT_FIELDS:
         value = tool_input.get(field)
         if isinstance(value, str):
-            return set(value.splitlines())
+            return {line for line in value.splitlines() if line.strip()}
     return None
 
 
@@ -53,9 +54,16 @@ def main():
     # fragment on its own would number the lines from the fragment rather than
     # from the file.
     hits = engine.scan_file(text, loaded, path)
-    introduced = introduced_lines(tool_input)
+    introduced = introduced_text(tool_input)
     if introduced is not None:
-        hits = [hit for hit in hits if hit[1] in introduced]
+        # An edit can replace part of a line, so the new text is a fragment of
+        # the line it lands in rather than the whole of it. The line counts as
+        # touched when it contains one of the fragments.
+        hits = [
+            hit
+            for hit in hits
+            if any(fragment in hit[1] for fragment in introduced)
+        ]
     if not hits:
         return 0
     for number, raw, message in hits[:engine.MAX_LINES]:
