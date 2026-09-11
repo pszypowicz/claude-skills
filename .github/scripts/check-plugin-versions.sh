@@ -22,7 +22,8 @@ Options:
 Checks (fails on any):
   1. Every plugins/*/.claude-plugin/plugin.json and its marketplace.json entry
      must agree on version.
-  2. For any plugin whose version differs from the base ref, the tag
+  2. The README.md plugin table must list every plugin with the same version.
+  3. For any plugin whose version differs from the base ref, the tag
      {name}--v{version} must not already exist.
 
 Example:
@@ -54,11 +55,22 @@ done
 
 repo_root="$(git rev-parse --show-toplevel)"
 marketplace="$repo_root/.claude-plugin/marketplace.json"
+readme="$repo_root/README.md"
 
 if [[ ! -f "$marketplace" ]]; then
   echo "error: marketplace.json not found at $marketplace" >&2
   exit 1
 fi
+if [[ ! -f "$readme" ]]; then
+  echo "error: README.md not found at $readme" >&2
+  exit 1
+fi
+
+# Version cell of the README plugin-table row for plugin $1, empty when the
+# row is missing. Rows look like: | [`ado`](plugins/ado/...) | 2.0.1 | ... |
+readme_version() {
+  awk -F'|' -v name="$1" '$2 ~ "\\[`" name "`\\]" { gsub(/ /, "", $3); print $3; exit }' "$readme"
+}
 
 base_commit=""
 if git rev-parse -q --verify "$base_ref" >/dev/null 2>&1; then
@@ -87,6 +99,18 @@ for plugin_json in "${plugin_jsons[@]}"; do
   fi
   if [[ "$marketplace_version" != "$version" ]]; then
     echo "FAIL: $name version mismatch - plugin.json=$version marketplace.json=$marketplace_version"
+    failures=$((failures + 1))
+    continue
+  fi
+
+  readme_ver="$(readme_version "$name")"
+  if [[ -z "$readme_ver" ]]; then
+    echo "FAIL: $name has no row in the README plugin table"
+    failures=$((failures + 1))
+    continue
+  fi
+  if [[ "$readme_ver" != "$version" ]]; then
+    echo "FAIL: $name version mismatch - plugin.json=$version README.md=$readme_ver"
     failures=$((failures + 1))
     continue
   fi

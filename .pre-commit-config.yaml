@@ -1,0 +1,27 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-json
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+
+  - repo: local
+    hooks:
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        args: [-x]
+        language: system
+        types: [shell]
+      - id: plugin-versions
+        name: plugin versions consistent
+        entry: .github/scripts/check-plugin-versions.sh
+        language: script
+        pass_filenames: false
+        files: (^\.claude-plugin/marketplace\.json$|/\.claude-plugin/plugin\.json$|^README\.md$)
