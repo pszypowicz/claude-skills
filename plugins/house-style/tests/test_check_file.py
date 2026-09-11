@@ -32,8 +32,10 @@ def invoke(payload, config_dir=None):
     )
 
 
-def run(path, config_dir=None):
-    return invoke(json.dumps({"tool_input": {"file_path": path}}), config_dir)
+def run(path, config_dir=None, **fields):
+    tool_input = {"file_path": path}
+    tool_input.update(fields)
+    return invoke(json.dumps({"tool_input": tool_input}), config_dir)
 
 
 def written(name, body):
@@ -135,6 +137,34 @@ class TestCheckFile(unittest.TestCase):
 
     def test_top_level_null_passes(self):
         result = invoke("null")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "")
+
+    def test_a_write_payload_reports_the_content_it_carries(self):
+        body = "A clean line.\na load-bearing claim\n"
+        result = run(self.make(".md", body), content=body)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Buzzword", result.stderr)
+        self.assertIn(":2:", result.stderr)
+
+    def test_an_edit_payload_leaves_an_untouched_violation_alone(self):
+        path = self.make(".md", "an old smoking gun line\na load-bearing claim\n")
+        result = run(path, new_string="a load-bearing claim")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(":2:", result.stderr)
+        self.assertNotIn("smoking gun", result.stderr)
+        self.assertNotIn(":1:", result.stderr)
+
+    def test_a_payload_with_neither_field_reports_the_whole_file(self):
+        path = self.make(".md", "an old smoking gun line\na load-bearing claim\n")
+        result = run(path)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(":1:", result.stderr)
+        self.assertIn(":2:", result.stderr)
+
+    def test_an_edit_that_introduces_nothing_reports_nothing(self):
+        path = self.make(".md", "a load-bearing claim\n")
+        result = run(path, new_string="A clean replacement.")
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
 
