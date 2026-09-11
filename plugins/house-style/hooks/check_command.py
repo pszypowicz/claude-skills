@@ -11,28 +11,101 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rules as engine  # noqa: E402
 
-VALUE_FLAGS = {"-m", "--message", "--body", "--title", "--notes"}
+VALUE_FLAGS = {"-m", "--message", "--body", "--title", "--notes", "-b", "-t", "-n"}
 FILE_FLAGS = {"-F", "--file", "--body-file"}
 BREAKS = {"&&", "||", ";", "|", "&"}
+BREAK_CHARS = "".join(sorted({char for token in BREAKS for char in token}))
 HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?")
 
 
-def heredoc_bodies(command):
-    """Return the text between each heredoc marker and its closing line."""
+def strip_heredocs(command):
+    """Return the command with each heredoc body cut out, and the extracted bodies.
+
+    A heredoc body is not shell syntax: it can hold an unbalanced quote (an
+    apostrophe in prose) that would otherwise make shlex.split raise on the
+    whole command. Removing the bodies before tokenizing keeps the outer
+    command parseable; the bodies are scanned separately as raw text.
+    """
     bodies = []
+    out = []
+    pos = 0
     for match in HEREDOC.finditer(command):
+        if match.start() < pos:
+            continue
+        out.append(command[pos:match.start()])
         after = command[match.end():]
         closing = re.search(
             r"^\s*{}\s*$".format(re.escape(match.group(1))), after, re.MULTILINE
         )
-        bodies.append(after[: closing.start()] if closing else after)
-    return bodies
+        if closing:
+            bodies.append(after[:closing.start()])
+            end = match.end() + closing.end()
+            if end < len(command) and command[end] == "\n":
+                end += 1
+        else:
+            bodies.append(after)
+            end = len(command)
+        out.append(" ")
+        pos = end
+    out.append(command[pos:])
+    return "".join(out), bodies
+
+
+def normalize_breaks(text):
+    """Turn an unquoted newline into a semicolon so it acts as a command break.
+
+    shlex treats a literal newline as ordinary whitespace, so a compound
+    command spread across lines never resets the active git/gh state. A
+    newline inside a quoted argument is left alone, since it is part of the
+    argument's text, not a separator between commands.
+    """
+    out = []
+    quote = None
+    escaped = False
+    for char in text:
+        if escaped:
+            out.append(char)
+            escaped = False
+            continue
+        if quote:
+            if char == "\\" and quote == '"':
+                out.append(char)
+                escaped = True
+                continue
+            if char == quote:
+                quote = None
+            out.append(char)
+            continue
+        if char == "\\":
+            out.append(char)
+            escaped = True
+            continue
+        if char in ("'", '"'):
+            quote = char
+            out.append(char)
+            continue
+        out.append(";" if char == "\n" else char)
+    return "".join(out)
+
+
+def tokenize(command):
+    """Split a command into words, treating a run of BREAK_CHARS as its own token.
+
+    Plain shlex.split leaves an operator glued to an adjacent word (`status;`
+    stays one token), so a break right after a subcommand name is missed.
+    punctuation_chars makes shlex peel operators off on either side while
+    still honoring quotes.
+    """
+    lex = shlex.shlex(command, posix=True, punctuation_chars=BREAK_CHARS)
+    lex.whitespace_split = True
+    return list(lex)
 
 
 def messages(command):
     """Return every message string that the command hands to git or gh."""
+    stripped, bodies = strip_heredocs(command)
     try:
-        tokens = shlex.split(command)
+        tokens = tokenize(normalize_breaks(stripped))
     except ValueError:
         return []
     found = []
@@ -54,12 +127,15 @@ def messages(command):
             continue
         if active and token in FILE_FLAGS and index + 1 < len(tokens):
             if tokens[index + 1] == "-":
-                found.extend(heredoc_bodies(command))
+                found.extend(bodies)
             index += 2
             continue
         name, sign, inline = token.partition("=")
-        if active and sign and name in VALUE_FLAGS:
-            found.append(inline)
+        if active and sign:
+            if name in VALUE_FLAGS:
+                found.append(inline)
+            elif name in FILE_FLAGS and inline == "-":
+                found.extend(bodies)
         index += 1
     return found
 
@@ -80,7 +156,17 @@ def main():
     except ValueError:
         print(json.dumps(decision()))
         return 0
-    command = (payload.get("tool_input") or {}).get("command") or ""
+    if not isinstance(payload, dict):
+        print(json.dumps(decision()))
+        return 0
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        print(json.dumps(decision()))
+        return 0
+    command = tool_input.get("command")
+    if not isinstance(command, str):
+        print(json.dumps(decision()))
+        return 0
     loaded = engine.load_rules()
     lines = []
     for text in messages(command):
