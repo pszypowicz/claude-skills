@@ -89,6 +89,24 @@ class TestDeny(unittest.TestCase):
         out = decide('gh pr create -n "we delve into it"')
         self.assertEqual(out["permissionDecision"], "deny")
 
+    def test_body_value_starting_with_a_dash_still_denies(self):
+        out = decide('gh pr create --title "Fix" --body "- we delve into it"')
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_short_body_value_starting_with_a_dash_still_denies(self):
+        out = decide('gh pr create --title "Fix" -b "- we delve into it"')
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_commit_message_starting_with_a_dash_still_denies(self):
+        out = decide('git commit -m "-a load-bearing claim"')
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_spaced_and_equals_forms_agree_on_a_dash_prefixed_value(self):
+        spaced = decide('gh pr create --body "- we delve into it"')
+        equals = decide('gh pr create --body="- we delve into it"')
+        self.assertEqual(spaced["permissionDecision"], "deny")
+        self.assertEqual(equals["permissionDecision"], "deny")
+
 
 class TestAllow(unittest.TestCase):
     def test_grep_for_a_banned_word(self):

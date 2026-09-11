@@ -131,11 +131,7 @@ def messages(command):
             index += 1
             continue
         value_flags = VALUE_FLAGS.get(active, set())
-        if (
-            token in value_flags
-            and index + 1 < len(tokens)
-            and not tokens[index + 1].startswith("-")
-        ):
+        if token in value_flags and index + 1 < len(tokens):
             found.append(tokens[index + 1])
             index += 2
             continue
