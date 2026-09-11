@@ -31,7 +31,10 @@
     { "match": "\\bin order to\\b", "message": "Write \"to\"." },
     { "match": "\\bprior to\\b", "message": "Write \"before\"." },
     { "match": "\\bin the event that\\b", "message": "Write \"if\"." },
-    { "match": "\\be\\.g\\.", "message": "Write \"for example\"." },
+    {
+      "match": "(?<![\\w.])e\\.g\\.",
+      "message": "Write \"for example\"."
+    },
     {
       "match": "\\bdelve[sd]?\\b",
       "message": "Write \"read\" or \"examine\"."
@@ -46,7 +49,8 @@
     },
     {
       "match": "\\w--\\w|\\s--\\s",
-      "message": "Double dash as prose punctuation. Use a single - with spaces."
+      "message": "Double dash as prose punctuation. Use a single - with spaces.",
+      "raw": true
     },
     {
       "match": "\\b(a|the) (maintainer|reviewer|maintainers|reviewers)\\b|\\bthe team\\b",

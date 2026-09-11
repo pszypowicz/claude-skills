@@ -19,7 +19,7 @@ def plugin_root():
 
 
 def user_rules_path():
-    config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    config = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude")
     return os.path.join(config, "house-style.json")
 
 
@@ -57,7 +57,9 @@ def _word_rules(rules, surface):
     selected = []
     for rule in rules["words"]:
         if rule.get("surface", "both") in ("both", surface):
-            selected.append((re.compile(rule["match"], re.IGNORECASE), rule["message"]))
+            selected.append(
+                (re.compile(rule["match"], re.IGNORECASE), rule["message"], rule.get("raw", False))
+            )
     return selected
 
 
@@ -75,20 +77,21 @@ def _scan(text, rules, path, surface, check_words, markdown):
     words = _word_rules(rules, surface) if check_words else []
     hits = []
     in_fence = False
-    for number, raw in enumerate(text.splitlines(), start=1):
+    for number, raw_line in enumerate(text.splitlines(), start=1):
         for pattern, message in characters:
-            if pattern.search(raw):
-                hits.append((number, raw, message))
-        if markdown and FENCE.match(raw):
+            if pattern.search(raw_line):
+                hits.append((number, raw_line, message))
+        if markdown and FENCE.match(raw_line):
             in_fence = not in_fence
             continue
         if markdown and in_fence:
             continue
-        testable = INLINE_CODE.sub(" ", raw) if markdown else raw
+        testable = INLINE_CODE.sub(" ", raw_line) if markdown else raw_line
         normalized = normalize(testable)
-        for pattern, message in words:
-            if pattern.search(normalized):
-                hits.append((number, raw, message))
+        for pattern, message, is_raw in words:
+            haystack = testable if is_raw else normalized
+            if pattern.search(haystack):
+                hits.append((number, raw_line, message))
     return hits
 
 

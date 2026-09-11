@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 HOOKS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "hooks")
 sys.path.insert(0, HOOKS)
@@ -101,6 +102,32 @@ class TestScanMessage(unittest.TestCase):
         self.assertEqual(len(hits), 1)
 
 
+def small_rules_with_raw_double_dash():
+    rules = small_rules()
+    rules["words"] = list(rules["words"]) + [
+        {"match": r"\w--\w|\s--\s", "message": "Double dash.", "raw": True}
+    ]
+    return rules
+
+
+class TestRawWordRules(unittest.TestCase):
+    def test_trips_the_double_dash_rule_on_the_raw_line(self):
+        hits = engine.scan_file(
+            "a well--known fact\n", small_rules_with_raw_double_dash(), "/tmp/a.md"
+        )
+        self.assertEqual(len(hits), 1)
+
+    def test_does_not_trip_the_double_dash_rule_on_a_cli_flag(self):
+        hits = engine.scan_file(
+            "gh pr create --draft\n", small_rules_with_raw_double_dash(), "/tmp/a.md"
+        )
+        self.assertEqual(hits, [])
+
+    def test_normalization_still_applies_to_a_rule_without_the_flag(self):
+        hits = engine.scan_file("a load--bearing claim\n", small_rules(), "/tmp/a.md")
+        self.assertEqual(len(hits), 1)
+
+
 class TestDefaultRules(unittest.TestCase):
     def test_the_shipped_file_parses(self):
         loaded = engine.load_rules(user_path="")
@@ -111,6 +138,65 @@ class TestDefaultRules(unittest.TestCase):
         path = os.path.join(engine.plugin_root(), "rules", "default.json")
         with open(path, "rb") as handle:
             self.assertNotIn(EM_DASH.encode("utf-8"), handle.read())
+
+
+# One must-match and one plausible must-not-match string per shipped word
+# rule, keyed by the rule's own pattern so the table stays tied to the rule
+# it describes rather than to its position in the list.
+WORD_RULE_CASES = {
+    r"\bload-bearing\b": ("a load-bearing claim", "load bearing wall"),
+    r"\bsmoking gun\b": ("found the smoking gun in the drawer", "smoking a cigarette outdoors"),
+    r"\bstated fairly\b": (
+        "it can be stated fairly that this works",
+        "a fair statement of the facts",
+    ),
+    r"\bleverage[sd]?\b": ("we leveraged the connections", "we are leveraging the connections"),
+    r"\butiliz(e|es|ed)\b": ("we utilized the resources", "utilizing the resources"),
+    r"\bin order to\b": ("in order to finish", "in order for this to work"),
+    r"\bprior to\b": ("prior to the meeting", "the prior year"),
+    r"\bin the event that\b": ("in the event that it fails", "in the event of rain"),
+    r"(?<![\w.])e\.g\.": ("for example, e.g. this one", "the file.e.g. backup"),
+    r"\bdelve[sd]?\b": ("let's delve into the details", "delving into the details"),
+    r"\bseamless(ly)?\b": ("a seamless integration", "a seamed edge"),
+    r"\b(colour|initialise|licence|cancelled)\b": (
+        "check the colour scheme",
+        "check the color scheme",
+    ),
+    r"\w--\w|\s--\s": ("a well--known fact", "gh pr create --draft"),
+    r"\b(a|the) (maintainer|reviewer|maintainers|reviewers)\b|\bthe team\b": (
+        "ask the maintainer for advice",
+        "ask a colleague for advice",
+    ),
+}
+
+
+class TestShippedWordRules(unittest.TestCase):
+    def test_every_shipped_word_rule_has_a_case(self):
+        shipped = [rule["match"] for rule in engine.load_rules(user_path="")["words"]]
+        self.assertEqual(set(shipped), set(WORD_RULE_CASES))
+
+    def test_each_shipped_word_rule_matches_and_rejects_as_intended(self):
+        for rule in engine.load_rules(user_path="")["words"]:
+            should_match, should_not_match = WORD_RULE_CASES[rule["match"]]
+            single = {"skip": [], "characters": [], "words": [rule]}
+            with self.subTest(pattern=rule["match"]):
+                self.assertTrue(
+                    engine.scan_message(should_match, single),
+                    "expected a match for {!r}".format(should_match),
+                )
+                self.assertEqual(
+                    engine.scan_message(should_not_match, single),
+                    [],
+                    "expected no match for {!r}".format(should_not_match),
+                )
+
+
+class TestUserRulesPath(unittest.TestCase):
+    def test_expands_a_tilde_in_claude_config_dir(self):
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "~/some-config-dir"}):
+            path = engine.user_rules_path()
+        expected = os.path.join(os.path.expanduser("~/some-config-dir"), "house-style.json")
+        self.assertEqual(path, expected)
 
 
 if __name__ == "__main__":
