@@ -10,7 +10,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rules as engine  # noqa: E402
 
-MAX_LINES = 20
 NEW_TEXT_FIELDS = ("content", "new_string")
 
 
@@ -59,11 +58,11 @@ def main():
         hits = [hit for hit in hits if hit[1] in introduced]
     if not hits:
         return 0
-    for number, raw, message in hits[:MAX_LINES]:
+    for number, raw, message in hits[:engine.MAX_LINES]:
         print("{}:{}: {}".format(path, number, message), file=sys.stderr)
         print("  {}".format(raw.strip()[:120]), file=sys.stderr)
-    if len(hits) > MAX_LINES:
-        print("... and {} more.".format(len(hits) - MAX_LINES), file=sys.stderr)
+    if len(hits) > engine.MAX_LINES:
+        print("... and {} more.".format(len(hits) - engine.MAX_LINES), file=sys.stderr)
     print(engine.REWRITE_NOTE, file=sys.stderr)
     return 2
 

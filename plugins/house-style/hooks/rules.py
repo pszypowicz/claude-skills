@@ -14,6 +14,9 @@ INLINE_CODE = re.compile(r"`[^`]*`")
 FENCE = re.compile(r"^\s*(?:```|~~~)")
 REWRITE_NOTE = "Rewrite the sentence. Do not split, hyphenate, or otherwise disguise the word."
 RULE_KEYS = ("skip", "characters", "words")
+# Both hooks feed their report straight into the model's context, so the
+# number of violations either one reports is capped.
+MAX_LINES = 20
 
 
 def plugin_root():

@@ -216,6 +216,21 @@ class TestAllow(unittest.TestCase):
         self.assertEqual(out["permissionDecision"], "allow")
 
 
+class TestReason(unittest.TestCase):
+    def test_it_names_the_line(self):
+        command = "git commit -F - <<EOF\nA clean line.\na load-bearing claim\nEOF"
+        reason = decide(command)["permissionDecisionReason"]
+        self.assertIn("line 2:", reason)
+
+    def test_it_is_capped(self):
+        body = "\n".join(["a load-bearing claim"] * 60)
+        command = "git commit -F - <<EOF\n{}\nEOF".format(body)
+        reason = decide(command)["permissionDecisionReason"]
+        self.assertIn("... and 40 more.", reason)
+        self.assertEqual(reason.count(" -> "), 20)
+        self.assertLess(len(reason), 2000)
+
+
 class TestBrokenUserRulesFile(unittest.TestCase):
     def setUp(self):
         self.config = tempfile.mkdtemp(prefix="house-style-broken-")

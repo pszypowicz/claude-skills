@@ -43,13 +43,16 @@ def strip_heredocs(command):
             r"^\s*{}\s*$".format(re.escape(match.group(1))), after, re.MULTILINE
         )
         if closing:
-            bodies.append(after[:closing.start()])
+            body = after[:closing.start()]
             end = match.end() + closing.end()
             if end < len(command) and command[end] == "\n":
                 end += 1
         else:
-            bodies.append(after)
+            body = after
             end = len(command)
+        # The body starts at the newline that ends the opener line, so drop
+        # that newline to keep the reported line numbers those of the text.
+        bodies.append(body[1:] if body.startswith("\n") else body)
         out.append(" ")
         pos = end
     out.append(command[pos:])
@@ -216,10 +219,13 @@ def main():
     loaded = engine.load_rules()
     lines = []
     for text in messages(command):
-        for _, raw, message in engine.scan_message(text, loaded):
-            lines.append("{} -> {}".format(raw.strip()[:80], message))
+        for number, raw, message in engine.scan_message(text, loaded):
+            lines.append("line {}: {} -> {}".format(number, raw.strip()[:80], message))
     if lines:
-        reason = "House style: " + " | ".join(lines) + " " + engine.REWRITE_NOTE
+        shown = lines[:engine.MAX_LINES]
+        if len(lines) > engine.MAX_LINES:
+            shown.append("... and {} more.".format(len(lines) - engine.MAX_LINES))
+        reason = "House style: " + " | ".join(shown) + " " + engine.REWRITE_NOTE
         print(json.dumps(decision(reason)))
     else:
         print(json.dumps(decision()))
