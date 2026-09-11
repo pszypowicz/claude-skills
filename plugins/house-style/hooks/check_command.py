@@ -50,9 +50,10 @@ def strip_heredocs(command):
         )
         if closing:
             body = after[:closing.start()]
+            # The newline after the terminator line stays in the command, so
+            # normalize_breaks can turn it into the command break it is. The
+            # next command then starts with no tool active.
             end = match.end() + closing.end()
-            if end < len(command) and command[end] == "\n":
-                end += 1
         else:
             body = after
             end = len(command)

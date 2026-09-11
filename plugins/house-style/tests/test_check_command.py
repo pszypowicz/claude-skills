@@ -79,6 +79,16 @@ class TestDeny(unittest.TestCase):
         command = "git commit -F - <<EOF\nit is the codebase's load-bearing part\nEOF"
         self.assertEqual(decide(command)["permissionDecision"], "deny")
 
+    def test_git_heredoc_ahead_of_a_foreign_one(self):
+        command = (
+            "git commit -F - <<'EOF'\na load-bearing claim\nEOF\n"
+            "cat <<'PY' > run.py\nif task.cancelled:\nPY"
+        )
+        out = decide(command)
+        self.assertEqual(out["permissionDecision"], "deny")
+        self.assertIn("Buzzword", out["permissionDecisionReason"])
+        self.assertNotIn("British spelling", out["permissionDecisionReason"])
+
     def test_gh_short_title_and_body_flags(self):
         out = decide('gh pr create -t "Fix" -b "we delve into it"')
         self.assertEqual(out["permissionDecision"], "deny")
@@ -217,6 +227,13 @@ class TestAllow(unittest.TestCase):
 
     def test_sql_heredoc_another_command_owns(self):
         command = "cat <<'SQL' > q.sql\nSELECT 1; -- get one row\nSQL\ngit add q.sql"
+        self.assertEqual(decide(command)["permissionDecision"], "allow")
+
+    def test_foreign_heredoc_after_a_git_heredoc(self):
+        command = (
+            "git commit -F - <<'EOF'\na clean message\nEOF\n"
+            "cat <<'PY' > run.py\nif task.cancelled:\nPY"
+        )
         self.assertEqual(decide(command)["permissionDecision"], "allow")
 
     def test_clustered_short_flags_without_a_message_flag(self):
