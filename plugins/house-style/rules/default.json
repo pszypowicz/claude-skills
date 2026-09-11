@@ -1,0 +1,57 @@
+{
+  "skip": [
+    "*/.config/claude/*",
+    "*/.claude/*",
+    "*CLAUDE.md",
+    "*CLAUDE.private.md",
+    "*/node_modules/*",
+    "*/vendor/*",
+    "*/.git/*"
+  ],
+  "characters": [
+    { "match": "\u2014", "message": "Em dash. Use a single -.", "files": "*" },
+    {
+      "match": "[^\\x00-\\x7F]",
+      "message": "Non-ASCII byte in a PowerShell file. Use ASCII only.",
+      "files": "*.ps1,*.psm1"
+    }
+  ],
+  "words": [
+    {
+      "match": "\\bload-bearing\\b",
+      "message": "Buzzword. Name the dependency."
+    },
+    {
+      "match": "\\bsmoking gun\\b",
+      "message": "Buzzword. State the evidence."
+    },
+    { "match": "\\bstated fairly\\b", "message": "Buzzword. Delete it." },
+    { "match": "\\bleverage[sd]?\\b", "message": "Write \"use\"." },
+    { "match": "\\butiliz(e|es|ed)\\b", "message": "Write \"use\"." },
+    { "match": "\\bin order to\\b", "message": "Write \"to\"." },
+    { "match": "\\bprior to\\b", "message": "Write \"before\"." },
+    { "match": "\\bin the event that\\b", "message": "Write \"if\"." },
+    { "match": "\\be\\.g\\.", "message": "Write \"for example\"." },
+    {
+      "match": "\\bdelve[sd]?\\b",
+      "message": "Write \"read\" or \"examine\"."
+    },
+    {
+      "match": "\\bseamless(ly)?\\b",
+      "message": "Carries no fact. Delete it."
+    },
+    {
+      "match": "\\b(colour|initialise|licence|cancelled)\\b",
+      "message": "British spelling. Use American English."
+    },
+    {
+      "match": "\\w--\\w|\\s--\\s",
+      "message": "Double dash as prose punctuation. Use a single - with spaces."
+    },
+    {
+      "match": "\\b(a|the) (maintainer|reviewer|maintainers|reviewers)\\b|\\bthe team\\b",
+      "message": "The reader is that person. Write \"you\".",
+      "surface": "message"
+    }
+  ]
+}
