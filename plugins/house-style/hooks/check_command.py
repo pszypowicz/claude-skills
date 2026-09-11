@@ -15,6 +15,8 @@ VALUE_FLAGS = {
     "git": {"-m", "--message"},
     "gh": {"-b", "-t", "-n", "--body", "--title", "--notes"},
 }
+# Flags whose value names a file rather than a message, so the value is
+# stepped over instead of scanned.
 FILE_FLAGS = {"-F", "--file", "--body-file"}
 BREAKS = {"&&", "||", ";", "|", "&"}
 BREAK_CHARS = "".join(sorted({char for token in BREAKS for char in token}))
@@ -104,12 +106,37 @@ def tokenize(command):
     return list(lex)
 
 
+def split_short_option(token, flags):
+    """Return (flag, attached value) when a short-option token carries a known flag.
+
+    Short options cluster, so `git commit -am "..."` passes -m inside the
+    token -am, and a short option can hold its value with no separator, so
+    `git commit -m'...'` arrives as the single token -m followed by the text.
+    The attached value is None when the flag ends the token, which means its
+    value is the next token.
+    """
+    if not token.startswith("-") or token.startswith("--") or len(token) < 3:
+        return None
+    for position, letter in enumerate(token[1:], start=1):
+        flag = "-" + letter
+        if flag in flags:
+            return flag, token[position + 1:] or None
+    return None
+
+
 def messages(command):
     """Return every message string that the command hands to git or gh.
 
     The value flags are keyed by tool, not merged into one flat set: -m
     means something to git and nothing to gh, -b/-t/-n mean something to gh
     and nothing to git, so the active tool decides which set applies.
+
+    A heredoc body counts as a message whenever the command runs git or gh at
+    all. The usual way to pass a multi-line message is
+    `--body "$(cat <<'EOF' ... EOF)"`, where the flag's own value tokenizes to
+    the command substitution rather than to the text, so tying the body to a
+    file flag would miss it. The cost is that a heredoc fed to some other
+    command in the same compound line is scanned too.
     """
     stripped, bodies = strip_heredocs(command)
     try:
@@ -118,6 +145,7 @@ def messages(command):
         return []
     found = []
     active = None
+    used_tool = False
     index = 0
     while index < len(tokens):
         token = tokens[index]
@@ -128,25 +156,33 @@ def messages(command):
         basename = os.path.basename(token)
         if basename in ("git", "gh"):
             active = basename
+            used_tool = True
             index += 1
             continue
         value_flags = VALUE_FLAGS.get(active, set())
-        if token in value_flags and index + 1 < len(tokens):
-            found.append(tokens[index + 1])
-            index += 2
-            continue
-        if active and token in FILE_FLAGS and index + 1 < len(tokens):
-            if tokens[index + 1] == "-":
-                found.extend(bodies)
-            index += 2
+        flag, attached = token, None
+        if active:
+            split = split_short_option(token, value_flags | FILE_FLAGS)
+            if split is not None:
+                flag, attached = split
+        if flag in value_flags:
+            if attached is not None:
+                found.append(attached)
+                index += 1
+                continue
+            if index + 1 < len(tokens):
+                found.append(tokens[index + 1])
+                index += 2
+                continue
+        if active and flag in FILE_FLAGS:
+            index += 1 if attached is not None else 2
             continue
         name, sign, inline = token.partition("=")
-        if active and sign:
-            if name in value_flags:
-                found.append(inline)
-            elif name in FILE_FLAGS and inline == "-":
-                found.extend(bodies)
+        if active and sign and name in value_flags:
+            found.append(inline)
         index += 1
+    if used_tool:
+        found.extend(bodies)
     return found
 
 

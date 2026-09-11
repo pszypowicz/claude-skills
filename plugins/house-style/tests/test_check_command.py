@@ -101,6 +101,34 @@ class TestDeny(unittest.TestCase):
         out = decide('git commit -m "-a load-bearing claim"')
         self.assertEqual(out["permissionDecision"], "deny")
 
+    def test_body_from_a_command_substitution_heredoc(self):
+        command = 'gh pr create --body "$(cat <<\'EOF\'\nwe delve into it\nEOF\n)"'
+        self.assertEqual(decide(command)["permissionDecision"], "deny")
+
+    def test_commit_message_from_a_command_substitution_heredoc(self):
+        command = 'git commit -m "$(cat <<\'EOF\'\na load-bearing claim\nEOF\n)"'
+        self.assertEqual(decide(command)["permissionDecision"], "deny")
+
+    def test_clustered_short_flags(self):
+        out = decide('git commit -am "a load-bearing claim"')
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_clustered_sign_off_flags(self):
+        out = decide('git commit -sm "a load-bearing claim"')
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_clustered_quiet_flags(self):
+        out = decide('git commit -aqm "a load-bearing claim"')
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_short_flag_with_an_attached_value(self):
+        out = decide("git commit -m'a load-bearing claim'")
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_clustered_short_flag_with_an_attached_value(self):
+        out = decide("git commit -am'a load-bearing claim'")
+        self.assertEqual(out["permissionDecision"], "deny")
+
     def test_spaced_and_equals_forms_agree_on_a_dash_prefixed_value(self):
         spaced = decide('gh pr create --body "- we delve into it"')
         equals = decide('gh pr create --body="- we delve into it"')
@@ -163,6 +191,14 @@ class TestAllow(unittest.TestCase):
 
     def test_segment_reset_is_checked(self):
         out = decide('git status && docker run -m "we delve into it"')
+        self.assertEqual(out["permissionDecision"], "allow")
+
+    def test_heredoc_without_git_or_gh(self):
+        command = "cat <<EOF > notes.md\nwe delve into it\nEOF"
+        self.assertEqual(decide(command)["permissionDecision"], "allow")
+
+    def test_clustered_short_flags_without_a_message_flag(self):
+        out = decide('git log -np "we delve into it"')
         self.assertEqual(out["permissionDecision"], "allow")
 
 
