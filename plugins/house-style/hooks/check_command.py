@@ -11,7 +11,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import rules as engine  # noqa: E402
 
-VALUE_FLAGS = {"-m", "--message", "--body", "--title", "--notes", "-b", "-t", "-n"}
+VALUE_FLAGS = {
+    "git": {"-m", "--message"},
+    "gh": {"-b", "-t", "-n", "--body", "--title", "--notes"},
+}
 FILE_FLAGS = {"-F", "--file", "--body-file"}
 BREAKS = {"&&", "||", ";", "|", "&"}
 BREAK_CHARS = "".join(sorted({char for token in BREAKS for char in token}))
@@ -102,26 +105,37 @@ def tokenize(command):
 
 
 def messages(command):
-    """Return every message string that the command hands to git or gh."""
+    """Return every message string that the command hands to git or gh.
+
+    The value flags are keyed by tool, not merged into one flat set: -m
+    means something to git and nothing to gh, -b/-t/-n mean something to gh
+    and nothing to git, so the active tool decides which set applies.
+    """
     stripped, bodies = strip_heredocs(command)
     try:
         tokens = tokenize(normalize_breaks(stripped))
     except ValueError:
         return []
     found = []
-    active = False
+    active = None
     index = 0
     while index < len(tokens):
         token = tokens[index]
         if token in BREAKS:
-            active = False
+            active = None
             index += 1
             continue
-        if os.path.basename(token) in ("git", "gh"):
-            active = True
+        basename = os.path.basename(token)
+        if basename in ("git", "gh"):
+            active = basename
             index += 1
             continue
-        if active and token in VALUE_FLAGS and index + 1 < len(tokens):
+        value_flags = VALUE_FLAGS.get(active, set())
+        if (
+            token in value_flags
+            and index + 1 < len(tokens)
+            and not tokens[index + 1].startswith("-")
+        ):
             found.append(tokens[index + 1])
             index += 2
             continue
@@ -132,7 +146,7 @@ def messages(command):
             continue
         name, sign, inline = token.partition("=")
         if active and sign:
-            if name in VALUE_FLAGS:
+            if name in value_flags:
                 found.append(inline)
             elif name in FILE_FLAGS and inline == "-":
                 found.extend(bodies)

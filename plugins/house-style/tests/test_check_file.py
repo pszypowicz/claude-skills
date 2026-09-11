@@ -123,6 +123,20 @@ class TestCheckFile(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
 
+    def test_top_level_list_passes(self):
+        result = subprocess.run(
+            [sys.executable, HOOK], input="[]", capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "")
+
+    def test_top_level_null_passes(self):
+        result = subprocess.run(
+            [sys.executable, HOOK], input="null", capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "")
+
     def test_output_pins_the_exact_shape(self):
         path = self.make(".md", "A clean line.\nThis is a load-bearing claim.\n")
         result = run(path)

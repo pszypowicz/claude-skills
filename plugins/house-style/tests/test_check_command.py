@@ -77,6 +77,18 @@ class TestDeny(unittest.TestCase):
         command = 'gh pr create --body-file=- <<EOF\na load-bearing claim\nEOF'
         self.assertEqual(decide(command)["permissionDecision"], "deny")
 
+    def test_no_verify_short_flag_does_not_swallow_the_message(self):
+        out = decide('git commit -n -m "a load-bearing claim"')
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_no_verify_long_flag_still_denies(self):
+        out = decide('git commit --no-verify -m "a load-bearing claim"')
+        self.assertEqual(out["permissionDecision"], "deny")
+
+    def test_gh_short_notes_flag_still_works_alongside_the_git_fix(self):
+        out = decide('gh pr create -n "we delve into it"')
+        self.assertEqual(out["permissionDecision"], "deny")
+
 
 class TestAllow(unittest.TestCase):
     def test_grep_for_a_banned_word(self):
@@ -120,7 +132,15 @@ class TestAllow(unittest.TestCase):
         self.assertEqual(decide(command)["permissionDecision"], "allow")
 
     def test_activation_gate_is_checked(self):
-        out = decide('docker run -m 512m && git status')
+        out = decide('docker run -m "we delve into it" && git status')
+        self.assertEqual(out["permissionDecision"], "allow")
+
+    def test_gh_only_flag_is_inert_under_git(self):
+        out = decide('git commit -b "we delve into it"')
+        self.assertEqual(out["permissionDecision"], "allow")
+
+    def test_git_only_flag_is_inert_under_gh(self):
+        out = decide('gh pr create -m "we delve into it"')
         self.assertEqual(out["permissionDecision"], "allow")
 
     def test_segment_reset_is_checked(self):
