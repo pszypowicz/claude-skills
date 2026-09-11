@@ -20,8 +20,11 @@ def main():
         return 0
     if not isinstance(payload, dict):
         return 0
-    path = (payload.get("tool_input") or {}).get("file_path") or ""
-    if not path or not os.path.isfile(path):
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return 0
+    path = tool_input.get("file_path")
+    if not isinstance(path, str) or not path or not os.path.isfile(path):
         return 0
     loaded = engine.load_rules()
     if any(fnmatch.fnmatch(path, glob) for glob in loaded["skip"]):

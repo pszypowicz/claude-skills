@@ -114,6 +114,26 @@ class TestCheckFile(unittest.TestCase):
         result = run(self.make_bytes(".md", b"\xff\xfe\x00\x01binary"))
         self.assertEqual(result.returncode, 0)
 
+    def test_tool_input_wrong_shape_passes(self):
+        result = subprocess.run(
+            [sys.executable, HOOK],
+            input=json.dumps({"tool_input": "x"}),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 0)
+
+    def test_output_pins_the_exact_shape(self):
+        path = self.make(".md", "A clean line.\nThis is a load-bearing claim.\n")
+        result = run(path)
+        self.assertEqual(result.returncode, 2)
+        expected = (
+            "{}:2: Buzzword. Name the dependency.\n"
+            "  This is a load-bearing claim.\n"
+            "Rewrite the sentence. Do not split, hyphenate, or otherwise disguise the word.\n"
+        ).format(path)
+        self.assertEqual(result.stderr, expected)
+
 
 if __name__ == "__main__":
     unittest.main()
