@@ -48,6 +48,13 @@
       "description": "Flag house-style violations in written prose and in commit messages: em dashes, non-ASCII bytes in PowerShell files, buzzwords, and filler phrases.",
       "version": "1.0.0",
       "tags": ["writing", "prose", "linting", "hooks", "commit-messages", "style"]
+    },
+    {
+      "name": "github",
+      "source": "./plugins/github",
+      "description": "GitHub's remote MCP server, limited to documentation search and the read-only security toolsets: code scanning, secret scanning, Dependabot alerts, and security advisories. Authenticates with the gh CLI keyring token.",
+      "version": "1.0.0",
+      "tags": ["github", "mcp", "docs", "security", "code-scanning", "secret-scanning", "dependabot"]
     }
   ]
 }
