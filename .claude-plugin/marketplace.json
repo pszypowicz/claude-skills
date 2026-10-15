@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "claude-skills",
-  "version": "2.0.0",
-  "description": "Personal Claude Code plugins: Azure DevOps, Go, Swift (concurrency + modern features), house style, and GitHub MCP.",
+  "version": "2.1.0",
+  "description": "Personal Claude Code plugins: Azure DevOps, Go, Swift (concurrency + modern features), house style, GitHub MCP, and transcript timestamps.",
   "owner": {
     "name": "Przemyslaw Szypowicz"
   },
@@ -48,6 +48,13 @@
       "description": "GitHub's remote MCP server, limited to documentation search and the read-only security toolsets: code scanning, secret scanning, Dependabot alerts, and security advisories. Authenticates with the gh CLI keyring token.",
       "version": "1.0.0",
       "tags": ["github", "mcp", "docs", "security", "code-scanning", "secret-scanning", "dependabot"]
+    },
+    {
+      "name": "timestamps",
+      "source": "./plugins/timestamps",
+      "description": "Show when each prompt, reply block, and tool call in the transcript was produced, as a dim time at the right edge of the row.",
+      "version": "0.1.0",
+      "tags": ["transcript", "timestamps", "ui", "mod", "hooks"]
     }
   ]
 }

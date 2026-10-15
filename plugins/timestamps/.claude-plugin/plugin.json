@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "timestamps",
+  "description": "Show when each prompt, reply block, and tool call in the transcript was produced, as a dim time at the right edge of the row.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Przemyslaw Szypowicz"
+  },
+  "types": "./types/index.d.ts"
+}
