@@ -6,10 +6,10 @@ A small Claude Code marketplace of plugins I use day to day. Nothing here is pro
 
 ```
 /plugin marketplace add pszypowicz/claude-skills
-/plugin install <plugin-name>@pszypowicz-claude-skills
+/plugin install <plugin-name>@claude-skills
 ```
 
-Once added, `/plugin` lists everything the marketplace offers. The marketplace is internally named `pszypowicz-claude-skills` (derived from the repo slug).
+Once added, `/plugin` lists everything the marketplace offers. The marketplace is named `claude-skills`, after the `name` in `.claude-plugin/marketplace.json`.
 
 ## Plugins
 
@@ -21,6 +21,7 @@ Once added, `/plugin` lists everything the marketplace offers. The marketplace i
 | [`go-dev`](plugins/go-dev/skills/go-dev/SKILL.md)                                  | 1.0.0   | Go development with a toolchain-first verification workflow: writing, testing, debugging, profiling, and dependency management.                                                                                                                             |
 | [`house-style`](plugins/house-style/skills/house-style/SKILL.md)                   | 1.0.0   | Flag house-style violations in written prose and in git and gh message text: em dashes, non-ASCII bytes in PowerShell files, buzzwords, and filler phrases. Ships a word list and merges an optional user list.                                             |
 | [`github`](plugins/github/README.md)                                               | 1.0.0   | GitHub's remote MCP server, limited to documentation search and the read-only security toolsets: code scanning, secret scanning, Dependabot alerts, and security advisories. Authenticates with the `gh` CLI keyring token, so no token variable is needed. |
+| [`timestamps`](plugins/timestamps/README.md)                                       | 0.1.0   | Show when each prompt, reply block, and tool call in the transcript was produced, as a dim time at the right edge of the row.                                                                                                                               |
 
 ## Layout
 
@@ -35,6 +36,7 @@ plugins/<name>/
   commands/                        # slash commands, where applicable
   hooks/                           # hook scripts and hooks.json, where applicable
   rules/                           # data files the hooks read, where applicable
+  types/                           # TypeScript declarations of a hooks module's state, where applicable
   tests/                           # test suites for bundled scripts, where applicable
 ```
 
