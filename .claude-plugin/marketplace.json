@@ -53,7 +53,7 @@
       "name": "timestamps",
       "source": "./plugins/timestamps",
       "description": "Show when each prompt, reply block, and tool call in the transcript was produced, as a dim time at the right edge of the row.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "tags": ["transcript", "timestamps", "ui", "mod", "hooks"]
     }
   ]

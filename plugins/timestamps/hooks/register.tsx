@@ -1,23 +1,7 @@
-import { atom, memberOf, read, update } from 'claude-code'
+import { memberOf, read } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderInput } from 'claude-code'
 
-import type { History, Stamps } from '../types'
-
 const at = { plugin: 'timestamps', key: 'at' } as const
-const history = atom({ plugin: 'timestamps', key: 'history' } as const, {
-  path: '',
-  stamps: {},
-} as History)
-
-// One "<ISO timestamp>\t<id>" line per transcript row uuid and per tool_use
-// block the row holds. jq reads the file on the host, so a transcript past
-// the 4 MiB limit of $.fs.read still loads.
-const TRANSCRIPT_STAMPS = [
-  'fromjson? | objects | select(.uuid and .timestamp)',
-  '| .timestamp as $t',
-  '| (.uuid, (.message.content? | arrays | .[] | objects | select(.type == "tool_use") | .id))',
-  '| [$t, .] | @tsv',
-].join(' ')
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
@@ -43,36 +27,10 @@ export const idsOf = (uuid: string, content: readonly { type: string; [field: st
   ),
 ]
 
-export const parseStamps = (tsv: string): Stamps => {
-  const stamps: Stamps = {}
-  for (const line of tsv.split('\n')) {
-    const [iso, id] = line.split('\t')
-    const time = iso ? Date.parse(iso) : NaN
-    if (id && !Number.isNaN(time) && !(id in stamps)) {
-      stamps[id] = time
-    }
-  }
-
-  return stamps
-}
-
-const backfill = async ($: EngineInterface, path: string) => {
-  if (!path || (await read($, history)).path === path) {
-    return
-  }
-  // A missing jq or file leaves the stamps empty, so the next prompt does not retry.
-  const stamps = await $.process
-    .run(['jq', '-Rr', TRANSCRIPT_STAMPS, path])
-    .then(({ exitCode, stdout }) => (exitCode === 0 ? parseStamps(stdout) : {}))
-    .catch(() => ({}))
-  await update($, history, () => ({ path, stamps }))
-}
-
 type Stamped = RenderInput<'UserMessage' | 'AssistantMessage' | 'ToolUse'>
 
 const stamped = async ($: EngineInterface, e: Stamped, row: RenderElement) => {
-  const time =
-    (await read($, memberOf(at, e))) ?? (await read($, history)).stamps[e.requestId]
+  const time = await read($, memberOf(at, e))
   if (time === undefined) {
     return row
   }
@@ -89,32 +47,24 @@ const stamped = async ($: EngineInterface, e: Stamped, row: RenderElement) => {
 }
 
 export const register: Register = on => {
-  on('session.append', async ($, e, next) => {
-    const time = await $.clock.now()
-    const stored = await next(e)
-    if (stored.deny === undefined && e.door !== 'queue') {
-      await Promise.all(
-        idsOf(stored.uuid, e.message.content).map(id => $.state.set({ ...at, id }, time)),
-      )
-    }
+  // Only the doors of rows the transcript draws. A plugin in a managed seat can
+  // continue past the user tier on the other doors, which skips this hook there
+  // and reports the skip.
+  on(
+    'session.append',
+    { door: ['prompt', 'command', 'response', 'tool-result', 'delivery'] },
+    async ($, e, next) => {
+      const time = await $.clock.now()
+      const stored = await next(e)
+      if (stored.deny === undefined) {
+        await Promise.all(
+          idsOf(stored.uuid, e.message.content).map(id => $.state.set({ ...at, id }, time)),
+        )
+      }
 
-    return stored
-  })
-
-  // Rows already in the transcript file (a resumed session, or the mod loaded
-  // mid-session) get their stamps from the file's own timestamps.
-  on('classic.SessionStart', async ($, e, next) => {
-    const ran = await next(e)
-    await backfill($, e.transcript_path)
-
-    return ran
-  })
-
-  on('classic.UserPromptSubmit', async ($, e, next) => {
-    await backfill($, e.transcript_path)
-
-    return next(e)
-  })
+      return stored
+    },
+  )
 
   on('ui.render', { component: 'UserMessage' }, async ($, e, next) =>
     stamped($, e, await next(e)),

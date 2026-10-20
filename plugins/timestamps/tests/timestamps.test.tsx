@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { formatStamp, parseStamps } from '../hooks/register'
+import { formatStamp } from '../hooks/register'
 
 const SURFACES = ['terminal', 'desktop'] as const
 const NOON = new Date(2026, 9, 15, 12, 34, 56).getTime()
@@ -13,6 +13,30 @@ const TOOL_ROW = {
   isRunning: false,
   isErrored: false,
   isInterrupted: false,
+}
+
+// Runs first and continues past every user-tier plugin, as a plugin in a
+// managed seat does on the classic events and on the doors the transcript
+// does not draw, and logs which plugins that skipped.
+const passOn = {
+  name: 'pass-on',
+  tier: 'prepend' as const,
+  register(on: any) {
+    on(
+      'session.append',
+      { door: ['attachment', 'hook-context', 'compaction'] },
+      async ($: any, e: any, next: any) => {
+        const r = await next.to(e, 'append')
+        $.ui.log(JSON.stringify(next.trace.filter((t: any) => t.reason).map((t: any) => t.plugin)))
+        return r
+      },
+    )
+    on('classic.*', async ($: any, e: any, next: any) => {
+      const r = await next.to(e, 'append')
+      $.ui.log(JSON.stringify(next.trace.filter((t: any) => t.reason).map((t: any) => t.plugin)))
+      return r
+    })
+  },
 }
 
 // Stands in for the engine's own drawing of each row.
@@ -56,35 +80,34 @@ describe('timestamps', () => {
     }
   })
 
-  test('rows already in the transcript get the time the file records', async ($, on) => {
-    mock.clock(on, { now: NOON })
-    engineRows(on)
-    on('process.run', () => ({
-      value: {
-        exitCode: 0,
-        stdout: `${new Date(NOON - 60_000).toISOString()}\tolder-row\n`,
-        stderr: '',
-        isStdoutTruncated: false,
-        isStderrTruncated: false,
-      },
-    }))
-    on('classic.UserPromptSubmit', () => ({}))
-
-    await $.classic.UserPromptSubmit({ prompt: 'hi', transcript_path: '/t.jsonl' } as never)
-
-    for (const surface of SURFACES) {
-      const ui = await $.ui.mount({
-        plugin: 'timestamps',
-        surface,
-        component: 'AssistantMessage',
-        requestId: 'older-row',
-        props: { text: 'hello', isFirstOfReply: true },
+  test(
+    'a plugin that runs first and passes events on skips no timestamps hook',
+    { plugins: [passOn] },
+    async ($, on) => {
+      const skipped: string[][] = []
+      mock.clock(on, { now: NOON })
+      on('ui.log', ($, e: any) => {
+        skipped.push(JSON.parse(e.text))
+        return { value: undefined }
       })
-      expect(
-        await ui.find({ type: 'Text', text: formatStamp(NOON - 60_000, NOON) }),
-      ).toBeDefined()
-    }
-  })
+      on('classic.SessionStart', () => ({}))
+
+      await $.session.append({
+        door: 'hook-context',
+        origin: { kind: 'engine' },
+        uuid: 'ctx-1',
+        message: {
+          type: 'attachment',
+          name: 'hook_additional_context',
+          content: [{ type: 'text', text: 'ctx' }],
+        },
+      } as never)
+      await $.classic.SessionStart({ source: 'startup' } as never)
+
+      expect(skipped.length).toBe(2)
+      expect(skipped.flat()).not.toContain('timestamps')
+    },
+  )
 
   test('a row with no recorded time is drawn as the engine drew it', async ($, on) => {
     mock.clock(on, { now: NOON })
@@ -106,11 +129,5 @@ describe('timestamps', () => {
   test('a time from an earlier day shows its date', () => {
     expect(formatStamp(NOON, NOON)).toBe('12:34:56')
     expect(formatStamp(NOON - 86_400_000, NOON)).toBe('10-14 12:34')
-  })
-
-  test('the first stamp of an id wins and bad lines are skipped', () => {
-    expect(
-      parseStamps('2026-10-15T10:00:00.000Z\ta\nnot a line\n2026-10-15T11:00:00.000Z\ta\n'),
-    ).toEqual({ a: Date.parse('2026-10-15T10:00:00.000Z') })
   })
 })
