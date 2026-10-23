@@ -40,6 +40,10 @@
       "message": "Carries no fact. Delete it."
     },
     {
+      "match": "\\blegs?\\b",
+      "message": "Jargon. Name the build, job, or step."
+    },
+    {
       "match": "\\b(colour|initialise|licence|cancelled)\\b",
       "message": "British spelling. Use American English."
     },

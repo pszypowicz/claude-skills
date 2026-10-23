@@ -39,7 +39,7 @@
       "name": "house-style",
       "source": "./plugins/house-style",
       "description": "Flag house-style violations in written prose and in commit messages: em dashes, non-ASCII bytes in PowerShell files, buzzwords, and filler phrases.",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "tags": ["writing", "prose", "linting", "hooks", "commit-messages", "style"]
     },
     {
