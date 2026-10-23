@@ -99,6 +99,8 @@ Words:
 - `\bin the event that\b` - write "if".
 - `\bdelv(e[sd]?|ing)\b` - write "read" or "examine".
 - `\bseamless(ly)?\b` - carries no fact. Delete it.
+- `\blegs?\b` - jargon for one part of a build or a route. Name the build,
+  job, or step.
 - `\b(colour|initialise|licence|cancelled)\b` - British spelling. Use American
   English.
 - `(?:^|(?<=[\s(\[]))(?<!\]\()[^\s#/()\[\]]*\w--\w|\s--\s(?!\s*-)` - a double

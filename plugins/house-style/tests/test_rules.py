@@ -253,6 +253,10 @@ WORD_RULE_CASES = {
         ["twelve open items"],
     ),
     r"\bseamless(ly)?\b": (["a seamless integration"], ["a seamed edge"]),
+    r"\blegs?\b": (
+        ["The arm64 leg builds under QEMU", "both legs of the matrix"],
+        ["the legacy client", "a legal review"],
+    ),
     r"\b(colour|initialise|licence|cancelled)\b": (
         ["check the colour scheme"],
         ["check the color scheme"],
