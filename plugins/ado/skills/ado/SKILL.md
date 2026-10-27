@@ -28,8 +28,13 @@ Check what is available:
 ```bash
 echo "ORG=${ADO_ORG:-MISSING} PROJECT=${ADO_PROJECT:-MISSING} PAT=${AZURE_DEVOPS_EXT_PAT:+set} TOKEN=${ADO_TOKEN:+set}"
 command -v sequester >/dev/null && sequester secret list   # sequester profiles (names only, no prompt)
-az account show --query user.name -o tsv 2>/dev/null || echo "az: not logged in"
+az account show --query '[user.name, tenantId]' -o tsv 2>/dev/null || echo "az: not logged in"
+# Entra tenant behind the org (anonymous request, no credentials needed)
+curl -sS -o /dev/null -D - "$ADO_ORG/_apis/connectionData" | tr -d '\r' \
+  | awk -F': *' 'tolower($1) == "x-vss-resourcetenant" { print "org tenant: " $2 }'
 ```
+
+When the two tenants differ, plain `az devops` commands fail under the az login fallback, so run them through `ado-exec.sh` (see "az CLI token fallback" below).
 
 ### Sequester profiles (nothing exported)
 
@@ -54,21 +59,36 @@ Once org and project are known, auth resolves in this order (mirrors `scripts/li
 
 1. **`AZURE_DEVOPS_EXT_PAT`** - PAT. The `az` CLI picks it up automatically; curl uses Basic auth.
 2. **`ADO_TOKEN`** - pre-minted Entra access token; curl uses Bearer auth.
-3. **az CLI login** - no credential env vars needed, requires a prior `az login`. The `az devops`/`az repos`/`az pipelines`/`az boards` commands authenticate with the signed-in account on their own; only `ADO_ORG` and `ADO_PROJECT` are still required. For curl, mint a token for the Azure DevOps resource (`499b84ac-1321-427f-aa17-267ca6975798` - fixed public GUID, same for every tenant).
+3. **az CLI login** - no credential env vars needed, requires a prior `az login`. The token is minted for the Entra tenant that backs the org, which can differ from the tenant of your Azure subscriptions.
 
-az-minted tokens expire after about an hour. On an unexpected 401 (or an HTML sign-in page in a response body) mid-session, re-mint the token and rebuild `AUTH` before suspecting a permissions problem. The Bearer token also works against the `vssps.dev.azure.com` and `feeds.dev.azure.com` hosts.
+Under the az login fallback, run each command block through `ado-exec.sh`. It mints the token and exports it to the wrapped command only, as `ADO_TOKEN`, as `AZURE_DEVOPS_EXT_PAT` for the `az devops`, `az repos`, `az pipelines`, `az boards` and `az artifacts` commands, and as `ADO_AUTH_HEADER` for curl. The wrapper writes nothing to disk, and the calling shell never sees the token. With a PAT exported, the wrapper runs the command unchanged. The `az devops` extension tries cached `az login` accounts before the exported token, so if several accounts are signed in to `az`, an `az` command can run as a different identity than curl (see `reference.md`). Batch the commands into one block per run, as with a sequester exec:
+
+```bash
+${CLAUDE_SKILL_DIR}/scripts/ado-exec.sh -- bash -c '
+  az boards work-item show --id <ID> --org "$ADO_ORG" --detect false
+  curl -sS -H "$ADO_AUTH_HEADER" "$ADO_ORG/_apis/connectionData"
+'
+```
+
+The wrapper exists because the `az devops` extension asks `az login` for tokens only in the tenants of your cached subscriptions. When the org sits in another tenant, every `az devops` call fails with "has not been materialized" (see Troubleshooting). The wrapper reads the org's tenant from the `X-VSS-ResourceTenant` header of an anonymous request to `$ADO_ORG/_apis/connectionData` and runs `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --tenant <org tenant>`. The GUID is the public Azure DevOps resource, the same in every tenant. If your account is a member or guest of the org's tenant, this works from your existing `az login` without a prompt. Set `ADO_TENANT_ID` to skip the lookup. The bundled scripts do the same on their own.
+
+Minted tokens expire after about an hour, and each wrapper run mints a new one. When Azure DevOps rejects a minted token, the bundled scripts mint once more and retry the request once. They never replace a PAT or `ADO_TOKEN` that you supplied. After an unexpected 401, a 302 to sign-in or an HTML page in an ad-hoc block, check which commands in the block already went through. Rerun only the failed command through the wrapper before you suspect a permissions problem, and never replay a write that may have been applied. The Bearer token also works against the `vssps.dev.azure.com` and `feeds.dev.azure.com` hosts.
+
+Keep `az login --tenant <org tenant> --allow-no-subscriptions` for orgs whose tenant demands an interactive sign-in, because that login can switch your default subscription to a tenant-level account in the org's tenant. `reference.md` ("Authentication internals") has the details and the error-by-error fixes.
 
 If `ADO_ORG` or `ADO_PROJECT` is missing, derive them from the repo remote when possible (`git remote get-url origin`; HTTPS remotes look like `https://dev.azure.com/<org>/<project>/_git/<repo>`, SSH like `git@ssh.dev.azure.com:v3/<org>/<project>/<repo>`) and set them for the commands you run.
 
 ### REST auth header
 
-Set `AUTH` once from whichever source is available - the curl snippets in this skill pass `-H "$AUTH"` and work with either form. Under a sequester profile, build `AUTH` inside the wrapped block - the variables only exist there:
+Set `AUTH` once from whichever source is available - the curl snippets in this skill pass `-H "$AUTH"` and work with either form. Under a sequester profile or `ado-exec.sh`, build `AUTH` inside the wrapped block - the variables only exist there:
 
 ```bash
-if [[ -n "${AZURE_DEVOPS_EXT_PAT:-}" ]]; then
+if [[ -n "${ADO_AUTH_HEADER:-}" ]]; then
+  AUTH="$ADO_AUTH_HEADER"   # set by ado-exec.sh
+elif [[ -n "${AZURE_DEVOPS_EXT_PAT:-}" ]]; then
   AUTH="Authorization: Basic $(printf ':%s' "$AZURE_DEVOPS_EXT_PAT" | base64 | tr -d '\n')"
 else
-  AUTH="Authorization: Bearer ${ADO_TOKEN:-$(az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv)}"
+  AUTH="Authorization: Bearer ${ADO_TOKEN:?no credentials - run this block through ado-exec.sh}"
 fi
 ```
 
@@ -239,7 +259,7 @@ az pipelines delete --id <id> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 
 ### Run specific stages only (skip others)
 
-`az pipelines run` does not expose `stagesToSkip`. Use the `/pipelines/{id}/runs` REST endpoint directly. Stages listed in `stagesToSkip` end `skipped`, and downstream stages that depend on them run **as if the upstream succeeded** - so this is the correct way to rerun e.g. only a cleanup/destroy stage after a cancelled apply, without editing the pipeline YAML or adding approval gates.
+`az pipelines run` does not expose `stagesToSkip`. Use the `/pipelines/{id}/runs` REST endpoint directly. Stages listed in `stagesToSkip` end `skipped`, and downstream stages that depend on them run **as if the upstream succeeded** - so this is the correct way to rerun e.g. only a cleanup/destroy stage after a canceled apply, without editing the pipeline YAML or adding approval gates.
 
 ```bash
 # Identifier is the YAML `- stage: <id>`, not the displayName. Grab it from a
@@ -253,9 +273,9 @@ curl -sS -H "$AUTH" -X POST \
   }'
 ```
 
-Common use case: previous BVP run was cancelled mid-apply, leaving an orphan resource group in state. Skip every upstream stage and let only `TerraformDestroy` run - it reads the existing state backend and tears down what the cancelled apply created.
+Common use case: previous BVP run was canceled mid-apply, leaving an orphan resource group in state. Skip every upstream stage and let only `TerraformDestroy` run - it reads the existing state backend and tears down what the canceled apply created.
 
-Contrast with cancellation cascade (which is _not_ overridden by `stagesToSkip` on a running build): when a running build is cancelled, the upstream ends `Canceled` and downstream defaults to `Skipped` via the implicit `succeeded()` condition. No rerun button appears on the skipped stage. The fix there is a fresh queue with `stagesToSkip` as above, **not** re-running within the cancelled build.
+Contrast with cancellation cascade (which is _not_ overridden by `stagesToSkip` on a running build): when a running build is canceled, the upstream ends `Canceled` and downstream defaults to `Skipped` via the implicit `succeeded()` condition. No rerun button appears on the skipped stage. The fix there is a fresh queue with `stagesToSkip` as above, **not** re-running within the canceled build.
 
 Note: the older `/build/builds?api-version=7.1` endpoint silently ignores `stagesToSkip`. Use `/pipelines/{id}/runs?api-version=7.1-preview.1`.
 
@@ -300,8 +320,8 @@ Project-specific custom fields and work item types should be defined in your CLA
 # Show work item (all fields + relations)
 az boards work-item show --id <ID> --expand all --org "$ADO_ORG" --detect false -o json
 
-# Show specific fields only (NOTE: --expand and -f are mutually exclusive)
-az boards work-item show --id <ID> -f "System.Title,System.State,System.AssignedTo,<custom-field-1>,<custom-field-2>" --org "$ADO_ORG" --detect false -o json
+# Show specific fields only (-f needs --expand none, see Troubleshooting)
+az boards work-item show --id <ID> -f "System.Title,System.State,System.AssignedTo,<custom-field-1>,<custom-field-2>" --expand none --org "$ADO_ORG" --detect false -o json
 
 # Query work items (WIQL) - this command accepts --project
 az boards query --wiql "SELECT [System.Id], [System.Title], [System.State] FROM workitems WHERE [System.AreaPath] UNDER '<AreaPath>' AND [System.State] = 'Active' AND [System.WorkItemType] = '<TaskType>'" --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
@@ -421,6 +441,9 @@ ${CLAUDE_SKILL_DIR}/scripts/ado-get-run.sh --run-id <id>
 # Task logs
 ${CLAUDE_SKILL_DIR}/scripts/ado-get-logs.sh --run-id <id> --failed-only
 ${CLAUDE_SKILL_DIR}/scripts/ado-get-logs.sh --run-id <id> --task "Plan" --tail 100
+
+# Run a command block with an az login token for the org's tenant (no PAT exported)
+${CLAUDE_SKILL_DIR}/scripts/ado-exec.sh -- bash -c '<commands>'
 ```
 
 ## Branches, Tags & Feeds
@@ -585,7 +608,7 @@ az devops team list-member --team "<TeamName>" --org "$ADO_ORG" -p "$ADO_PROJECT
 
 ### --expand and -f are mutually exclusive
 
-`az boards work-item show` does not allow `--expand` and `-f` (fields) together. Use one or the other.
+`az boards work-item show` does not allow `--expand` and `-f` (fields) together, and `--expand` defaults to `all`. A bare `-f` fails with `The expand parameter can not be used with the fields parameter`, so pass `--expand none` with `-f`.
 
 ### Creating and activating a task requires two calls
 
@@ -615,6 +638,14 @@ curl -s -H "$AUTH" -H "Content-Type: application/json-patch+json" -X PATCH \
   -d '[{"op":"remove","path":"/relations/<idx>"}]'
 ```
 
+### Every az devops call fails with "has not been materialized"
+
+`Identity <id> has not been materialized, please use interactive login over the browser first` (HTTP 403, `AadUserStateException`) means the token was issued by a different Entra tenant than the one that backs the org. Universal package commands report the same failure as `Failed to update Universal Packages tooling`. Under the az login fallback this happens when all your cached subscriptions sit in one tenant and the org sits in another, because the `az devops` extension then uses that tenant's token without checking it. Run the commands through `ado-exec.sh`, which mints the token for the org's tenant. If a token from the org's tenant gets the same error, the org has not seen your account yet, so open the org once in a browser or ask an org admin to add you.
+
+### Unauthenticated requests redirect to sign-in (HTTP 302)
+
+Without valid credentials, Azure DevOps REST endpoints answer with a 302 redirect to a sign-in page, and some answer 203 with the sign-in page as HTML. curl treats neither as an error, so a JSON parser fails on the HTML instead. When a response does not parse, check its status with `curl -w '%{http_code}'`. The bundled scripts treat a 401, a redirect to sign-in, or an HTML page in answer to a read as rejected credentials. They mint a rejected az login token once more, and they stop with a message when a PAT or `ADO_TOKEN` is rejected.
+
 ### Build validation does not start on draft PRs
 
 A build-validation policy evaluation on a draft PR sits `queued` indefinitely - the build starts only when the PR is published. Do not poll the policy status of a freshly created draft. Either skip the gate (it runs on publish) or queue the evaluation explicitly when a green check is wanted up front:
@@ -632,10 +663,15 @@ A push to an already-queued PR re-triggers the evaluation; only then is polling 
 At the start of each session that involves assigning work items or adding PR reviewers, resolve the current user's identity:
 
 ```bash
-az ad signed-in-user show --query '{displayName: displayName, mail: mail, id: id}' -o json
+# AUTH as set in the Authentication section (Basic PAT or az Bearer token)
+curl -sS -H "$AUTH" "${ADO_ORG}/_apis/connectionData" | python3 -c "
+import sys, json
+u = json.load(sys.stdin)['authenticatedUser']
+mail = u.get('properties', {}).get('Account', {}).get('\$value')
+print(json.dumps({'displayName': u.get('providerDisplayName'), 'mail': mail, 'id': u['id']}))"
 ```
 
-Use the returned email for `--assigned-to` and the GUID for reviewer operations. Do **not** persist this to memory - the user may switch accounts between sessions.
+Use the returned email for `--assigned-to` and the GUID for reviewer operations. Azure DevOps answers this call itself, so the result holds for every auth source, including a guest account in the org's tenant. Avoid `az ad signed-in-user show` for this, because it returns your Entra object id in your home tenant, and reviewer operations need the Azure DevOps identity id. Do **not** persist this to memory - the user may switch accounts between sessions.
 
 ## Instructions
 
@@ -643,10 +679,10 @@ Check CLAUDE.md for project-specific ADO configuration (custom work item types, 
 
 When the user asks for an ADO operation:
 
-1. Resolve auth per the Authentication section (PAT, sequester profile, `ADO_TOKEN`, or az login token); instruct the user only if no source works
+1. Resolve auth per the Authentication section (PAT, sequester profile, `ADO_TOKEN`, or az login token through `ado-exec.sh`); instruct the user only if no source works
 2. Use `az` CLI with `-o json` when parsing programmatically, `-o table` for display
 3. For complex queries, chain commands (e.g., list pipelines -> find ID -> run pipeline)
-4. Use scripts from `${CLAUDE_SKILL_DIR}/scripts/` for: create-policy, get-run, get-logs, pr-threads
+4. Use scripts from `${CLAUDE_SKILL_DIR}/scripts/` for: create-policy, get-run, get-logs, pr-threads, and exec (az login token for a command block)
 5. For environments/checks/approvals and comments, use REST curl patterns
 6. For work items, remember: `az boards work-item show/update/relation add` are org-scoped (no `--project`), only `create` and `query` take `--project`
 7. When creating tasks from stories, inherit custom fields, area-path, and iteration-path from the parent
@@ -660,6 +696,6 @@ When the user asks for an ADO operation:
 
 For detailed reference material and real output examples, consult:
 
-- **`reference.md`** - Full az CLI flag tables, JMESPath query patterns, REST API details for environments/checks/approvals, work item comments, PR comment threads, work item field reference, identity resolution cascade, policy type GUIDs
+- **`reference.md`** - Full az CLI flag tables, JMESPath query patterns, REST API details for environments/checks/approvals, work item comments, PR comment threads, work item field reference, identity resolution cascade, policy type GUIDs, authentication internals (how the az devops extension picks a credential, tenant lookup, mint errors, why not `az login --allow-no-subscriptions`), native ArtifactTool on Apple Silicon
 - **`examples.md`** - Real output samples for all major commands (PR list/show/policy, pipeline list/runs, run tree, work item JSON, query results, task logs, PR threads, work item comments, code suggestions)
 - **`examples/project-claude-ado.md`** - Template for project-specific ADO configuration (custom fields, work item types, area/iteration paths) to add to your CLAUDE.md

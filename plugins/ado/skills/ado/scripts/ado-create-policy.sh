@@ -73,6 +73,7 @@ done
 [[ "$TYPE" == "required-reviewer" && ${#REVIEWERS[@]} -eq 0 ]] && { log_error "--reviewer is required for required-reviewer type"; usage >&2; exit 1; }
 
 ado_require_env
+ado_resolve_auth
 
 # Resolve a reviewer search term to an ADO identity GUID.
 # Accepts: raw GUID, email address, display name, or team name.
@@ -92,13 +93,9 @@ resolve_reviewer() {
   org_name="${ADO_ORG#https://dev.azure.com/}"
   local vssps_base="https://vssps.dev.azure.com/${org_name}"
 
-  [[ -z "${ADO_AUTH_HEADER:-}" ]] && ado_resolve_auth
-
   # Try Graph users API - match by email or display name, return descriptor
   local users_result
-  users_result=$(curl -s -S \
-    -H "$ADO_AUTH_HEADER" -H "Content-Type: application/json" \
-    "${vssps_base}/_apis/graph/users?api-version=7.1-preview.1" 2>/dev/null) || true
+  users_result=$(ado_request GET "${vssps_base}/_apis/graph/users?api-version=7.1-preview.1") || true
 
   if [[ -n "$users_result" ]]; then
     local descriptor
@@ -130,9 +127,7 @@ sys.exit(1)
     # Convert descriptor to storage key (GUID)
     if [[ -n "$descriptor" ]]; then
       local sk_result
-      sk_result=$(curl -s -S \
-        -H "$ADO_AUTH_HEADER" -H "Content-Type: application/json" \
-        "${vssps_base}/_apis/graph/storagekeys/${descriptor}?api-version=7.1-preview.1" 2>/dev/null) || true
+      sk_result=$(ado_request GET "${vssps_base}/_apis/graph/storagekeys/${descriptor}?api-version=7.1-preview.1") || true
 
       local guid
       guid=$(python3 -c "
@@ -155,9 +150,7 @@ except Exception:
 
   # Teams API fallback - team id is already a GUID
   local teams_result
-  teams_result=$(curl -s -S \
-    -H "$ADO_AUTH_HEADER" -H "Content-Type: application/json" \
-    "${ADO_ORG}/_apis/projects/${ADO_PROJECT}/teams?api-version=7.1" 2>/dev/null) || true
+  teams_result=$(ado_request GET "${ADO_ORG}/_apis/projects/${ADO_PROJECT}/teams?api-version=7.1") || true
 
   if [[ -n "$teams_result" ]]; then
     local resolved
@@ -214,7 +207,6 @@ except Exception:
 # Resolve all reviewer IDs upfront for required-reviewer type
 REVIEWER_IDS=()
 if [[ "$TYPE" == "required-reviewer" ]]; then
-  [[ -z "${ADO_AUTH_HEADER:-}" ]] && ado_resolve_auth
   for rev in "${REVIEWERS[@]}"; do
     rid=$(resolve_reviewer "$rev") || exit 1
     REVIEWER_IDS+=("$rid")

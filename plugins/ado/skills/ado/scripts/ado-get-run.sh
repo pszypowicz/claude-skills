@@ -34,6 +34,7 @@ done
 [[ -z "$RUN_ID" ]] && { log_error "--run-id is required"; usage >&2; exit 1; }
 
 ado_require_env
+ado_resolve_auth
 
 log_info "Fetching run #${RUN_ID}..."
 

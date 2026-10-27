@@ -445,3 +445,96 @@ curl -s -H "$AUTH" \
 curl -s -X PATCH -H "$AUTH" -H "Content-Type: application/json" -d '{}' \
   "$BASE/policy/evaluations/<EVAL_ID>?api-version=7.1-preview.1"
 ```
+
+## Authentication internals
+
+### How the az devops extension picks a credential
+
+Read from `azext_devops/dev/common/services.py` in the `azure-devops` extension 1.0.10:
+
+- `_get_credentials` tries `az login` tokens before `AZURE_DEVOPS_EXT_PAT`, even when the variable is set.
+- `get_token_from_az_logins` asks `az login` for tokens only in the tenants of cached subscriptions. With one tenant and no PAT, it uses that token without checking it against the org. That is why an org backed by another tenant fails with "has not been materialized".
+- With a PAT set, or with several cached tenants, it checks each token with a project list call and uses the first one the org accepts. It falls back to the PAT when none is accepted. So a minted token exported as `AZURE_DEVOPS_EXT_PAT` works, at the cost of one failed check call per cached tenant on each `az` command.
+- If several accounts are signed in to `az`, a command can run as whichever account the org accepts first, even with a PAT or `ado-exec.sh` token exported. `ado-exec.sh` cannot override this, so a block that mixes `az` and curl can act as two identities. Keep one account signed in to `az`, or use curl for writes that must run as the exported credential.
+
+### Tenant lookup and token minting
+
+`scripts/lib/ado-client.sh` and `scripts/ado-exec.sh` find the tenant with an anonymous request. Azure DevOps names the org's tenant in the `X-VSS-ResourceTenant` response header:
+
+```bash
+curl -sS -o /dev/null -D - "$ADO_ORG/_apis/connectionData" | tr -d '\r' \
+  | awk -F': *' 'tolower($1) == "x-vss-resourcetenant" { print $2 }'
+```
+
+The header can list several tenants, and the first real one is used. The nil GUID (`00000000-0000-0000-0000-000000000000`) marks an org that no Entra tenant backs, and the token is then minted without `--tenant`. If the lookup fails, the scripts warn and mint for the `az login` default tenant. `ADO_TENANT_ID` skips the lookup.
+
+```bash
+az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 \
+  --tenant <org tenant> --query accessToken -o tsv
+```
+
+The minted token works as a Bearer token for curl and as `AZURE_DEVOPS_EXT_PAT` for `az`, which sends it as Basic auth with an empty user name. It maps to the same Azure DevOps identity as your PAT. Access tokens last about an hour. A repeat call returns the cached token until it nears expiry, so minting again does not always give a new token.
+
+### Why not az login --allow-no-subscriptions
+
+`az login --tenant <org tenant> --allow-no-subscriptions` also makes the `az devops` extension find the org's tenant. Read from `azure/cli/core/_profile.py` in az CLI 2.90.0, it has these side effects:
+
+- `_set_subscriptions` merges the new tenant into the cached subscription list, so your existing subscriptions stay.
+- The default subscription moves to the new login's results unless your previous default is among them. An org tenant that holds none of your subscriptions adds only a tenant-level account (`N/A(tenant level account)`), and that account becomes the default. Every ARM command without `--subscription` then runs against a tenant with no subscription until you run `az account set`. The interactive subscription picker lists only the new tenant's entries.
+- It needs an interactive browser sign-in, and the extra tenant stays in the profile until `az logout`. With two tenants cached, the extension checks each tenant's token on every call.
+
+The header lookup with `--tenant` changes no `az` state and needs no extra sign-in. The login is still the fix when the org's tenant demands an interactive sign-in. Use the Azure DevOps scope, so the sign-in satisfies the policies for that resource, then restore your default subscription:
+
+```bash
+az login --tenant <org tenant> --allow-no-subscriptions --scope 499b84ac-1321-427f-aa17-267ca6975798/.default
+az account set --subscription <your subscription>
+```
+
+### Mint errors
+
+| `az` error                                                                         | Meaning                                                                   | Fix                                                |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------- |
+| `Please run 'az login'`                                                            | No `az login` session                                                     | `az login`, or use a PAT                           |
+| `AADSTS700082`                                                                     | The refresh token expired after a period without use that the tenant sets | `az login --tenant <subscription tenant>`          |
+| `AADSTS50020`, `AADSTS90072`                                                       | Your account is not a member or guest of the org's tenant                 | Ask an org admin for access, or use a PAT          |
+| `AADSTS50076`, `AADSTS50079`, `AADSTS50158`, `AADSTS65001`, `interaction_required` | The org's tenant requires an interactive sign-in                          | The scoped `az login` above, then `az account set` |
+
+Signing in to the tenant of your subscriptions finds the same subscriptions again, so your default subscription stays available. The scripts print the matching fix, followed by the `az` output.
+
+### Response handling in the bundled scripts
+
+`ado_request` in `scripts/lib/ado-client.sh` sends every REST call. It passes the credential to curl through stdin (`curl -K -`), which keeps it out of the process list.
+
+- A 401, or a redirect to a sign-in page, means the credential was rejected before the request ran. On a read (GET or HEAD), any redirect and any HTML page in a 2xx answer count as a rejection too.
+- A rejected token minted from `az login` is minted again and the request retried once. That holds for writes too, because a rejected request never ran. A token that `ado-exec.sh` minted carries the `ADO_TOKEN_MINTED=1` marker and is treated the same way.
+- When a script starts with a marked token that has expired or expires within 5 minutes (its `exp` claim), it mints a new one before the first request. A new token minted inside `$(...)` is lost when the subshell exits, so checking up front saves a rejected request and a mint for every later call.
+- Azure DevOps answers an expired token with a 302 to sign-in. It still accepts the token for a few minutes after the `exp` time.
+- A PAT or `ADO_TOKEN` that you supplied is never replaced, and the script stops with a message.
+- A write that gets an unexpected redirect or HTML page is not retried, because the change may have gone through.
+- A 403 with "has not been materialized" prints the token's tenant (its `tid` claim) next to the org's tenant.
+
+## Universal packages on Apple Silicon
+
+On arm64 Macs the `azure-devops` extension (1.0.10, `_get_current_release` in `artifacttool_updater.py`) downloads the x86_64 build of ArtifactTool and runs it under Rosetta. To run a native build, download the arm64 release once and point the extension at its directory with `AZURE_DEVOPS_EXT_ARTIFACTTOOL_OVERRIDE_PATH`. Upstream tracks this in Azure/azure-devops-cli-extension#1423.
+
+```bash
+# AUTH as set in SKILL.md's Authentication section
+# The client tools API lives on the host that the org's resource area names.
+BASE=$(curl -sS -H "$AUTH" \
+  "$ADO_ORG/_apis/resourceAreas/3fda18ba-dff2-42e6-8d10-c521b23b85fc?api-version=7.1-preview.1" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['locationUrl'].rstrip('/'))")
+URI=$(curl -sS -H "$AUTH" \
+  "$BASE/_apis/clienttools/ArtifactTool/release?osName=Darwin&arch=arm64&api-version=7.1-preview.1" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['uri'])")
+
+DIR="$HOME/.local/share/artifacttool-arm64"
+mkdir -p "$DIR"
+curl -sSL -o "$DIR/artifacttool.zip" "$URI"
+unzip -o -q "$DIR/artifacttool.zip" -d "$DIR"
+chmod +x "$DIR/artifacttool"
+
+# The variable names the directory that holds the artifacttool binary.
+export AZURE_DEVOPS_EXT_ARTIFACTTOOL_OVERRIDE_PATH="$DIR"
+```
+
+The override pins that build, so repeat the download when a newer ArtifactTool is needed.

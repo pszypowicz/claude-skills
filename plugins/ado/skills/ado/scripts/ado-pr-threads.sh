@@ -41,6 +41,7 @@ done
 [[ -z "$REPO" ]] && { log_error "--repo is required"; usage >&2; exit 1; }
 
 ado_require_env
+ado_resolve_auth
 
 log_info "Fetching threads for PR #${PR_ID} in ${REPO}..."
 
