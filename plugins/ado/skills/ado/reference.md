@@ -455,7 +455,19 @@ Read from `azext_devops/dev/common/services.py` in the `azure-devops` extension 
 - `_get_credentials` tries `az login` tokens before `AZURE_DEVOPS_EXT_PAT`, even when the variable is set.
 - `get_token_from_az_logins` asks `az login` for tokens only in the tenants of cached subscriptions. With one tenant and no PAT, it uses that token without checking it against the org. That is why an org backed by another tenant fails with "has not been materialized".
 - With a PAT set, or with several cached tenants, it checks each token with a project list call and uses the first one the org accepts. It falls back to the PAT when none is accepted. So a minted token exported as `AZURE_DEVOPS_EXT_PAT` works, at the cost of one failed check call per cached tenant on each `az` command.
-- If several accounts are signed in to `az`, a command can run as whichever account the org accepts first, even with a PAT or `ado-exec.sh` token exported. `ado-exec.sh` cannot override this, so a block that mixes `az` and curl can act as two identities. Keep one account signed in to `az`, or use curl for writes that must run as the exported credential.
+- If several accounts are signed in to `az`, a command can run as whichever account the org accepts first, even with a PAT or token exported. A block that mixes `az` and curl can then act as two identities.
+
+### How ado-exec.sh keeps az on the exported credential
+
+`ado-exec.sh` runs its command with `AZURE_CONFIG_DIR` set to an empty directory that `mktemp -d` creates under `$TMPDIR`. The directory is removed when the command exits. `az` finds no cached account there, so the extension falls back to the exported `AZURE_DEVOPS_EXT_PAT`. Checked against the `azure-devops` extension 1.0.10 and az CLI 2.90.0:
+
+- An exported token works, an invalid one fails with `TF400813`, and with nothing exported `az devops` asks for a login. No other credential is found.
+- `az` writes its command index and log files to the directory. No token is written there.
+- `AZURE_EXTENSION_DIR` points at the extensions of your own config (`$AZURE_CONFIG_DIR/cliextensions`, or `~/.azure/cliextensions`), so `az devops` stays installed. `AZURE_DEVOPS_EXT_CONFIG_DIR` points at `azuredevops` in the same config, where the extension keeps its defaults, its cache and the downloaded ArtifactTool. Values that you set for these two variables are kept.
+- `ADO_AZ_CONFIG_DIR` names your own config. The client library mints with it, so a bundled script inside the wrapper still mints from your `az login`.
+- Without cached tenants, `az` commands also skip the failed check call per tenant.
+
+`--shared-az-config` turns this off for a block that needs your login, for example for `az account`. In that block, and in commands run outside the wrapper, keep one account signed in to `az`, or use curl for writes that must run as the exported credential.
 
 ### Tenant lookup and token minting
 

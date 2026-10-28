@@ -157,7 +157,9 @@ def curl(argv):
 
 def az(argv):
     record({"tool": "az", "argv": argv,
-            "env": {k: os.environ.get(k) for k in ("AZURE_DEVOPS_EXT_PAT", "ADO_TOKEN")}})
+            "env": {k: os.environ.get(k) for k in (
+                "AZURE_DEVOPS_EXT_PAT", "ADO_TOKEN", "AZURE_CONFIG_DIR",
+                "AZURE_EXTENSION_DIR", "AZURE_DEVOPS_EXT_CONFIG_DIR")}})
     scenario = load_scenario()
     for index, route in enumerate(scenario.get("az", [])):
         match = route["match"]
