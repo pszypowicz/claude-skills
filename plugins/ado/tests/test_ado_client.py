@@ -43,6 +43,13 @@ DUMP_ENV = [
     "import json, os; print(json.dumps({k: os.environ.get(k) for k in "
     "['ADO_ORG', 'ADO_TOKEN', 'AZURE_DEVOPS_EXT_PAT', 'ADO_AUTH_HEADER', 'ADO_TOKEN_MINTED']}))",
 ]
+DUMP_AZ_DIRS = [
+    "python3", "-c",
+    "import json, os; d = os.environ.get('AZURE_CONFIG_DIR'); print(json.dumps({"
+    "'config': d, 'empty': bool(d) and os.path.isdir(d) and not os.listdir(d), "
+    "'extensions': os.environ.get('AZURE_EXTENSION_DIR'), "
+    "'devops': os.environ.get('AZURE_DEVOPS_EXT_CONFIG_DIR')}))",
+]
 
 
 def jwt(tid, name="token", exp=None):
@@ -126,7 +133,7 @@ class Fixture(_Base):
 
     # -- running -------------------------------------------------------------
 
-    def run_cmd(self, cmd, **env):
+    def run_cmd(self, cmd, stdin=None, **env):
         with open(os.path.join(self.tmp, "scenario.json"), "w") as f:
             json.dump(self.scenario, f)
         full = dict(self.env)
@@ -135,13 +142,13 @@ class Fixture(_Base):
                 full.pop(key, None)
             else:
                 full[key] = value
-        return subprocess.run(cmd, env=full, capture_output=True, text=True, timeout=120)
+        return subprocess.run(cmd, env=full, input=stdin, capture_output=True, text=True, timeout=120)
 
     def lib(self, body, **env):
         return self.run_cmd([self.SHELL, "-c", 'source "%s"\n%s' % (LIB, body)], **env)
 
-    def script(self, name, *args, **env):
-        return self.run_cmd([self.SHELL, os.path.join(SCRIPTS, name)] + list(args), **env)
+    def script(self, name, *args, stdin=None, **env):
+        return self.run_cmd([self.SHELL, os.path.join(SCRIPTS, name)] + list(args), stdin=stdin, **env)
 
     def calls(self, tool):
         path = os.path.join(self.tmp, "calls.jsonl")
@@ -639,6 +646,91 @@ class Exec(Fixture):
         self.assertEqual(result.returncode, 1)
         self.assertFalse(os.path.exists(marker))
 
+    def test_command_reads_stdin(self):
+        result = self.script("ado-exec.sh", "--", "cat", stdin="block\n", AZURE_DEVOPS_EXT_PAT=PAT)
+        self.assertOk(result)
+        self.assertEqual(result.stdout, "block\n")
+
+
+class ExecAzConfig(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.home_config = os.path.join(self.env["HOME"], ".azure")
+
+    def dirs(self, *args, **env):
+        result = self.script("ado-exec.sh", *args, "--", *DUMP_AZ_DIRS, **env)
+        self.assertOk(result)
+        return json.loads(result.stdout)
+
+    def assertFreshConfig(self, dirs, caller_config):
+        self.assertNotEqual(dirs["config"], caller_config)
+        self.assertTrue(dirs["config"].startswith(self.tmp + os.sep), dirs["config"])
+        self.assertTrue(dirs["empty"])
+        self.assertFalse(os.path.exists(dirs["config"]))
+
+    def test_minted_token_runs_with_a_fresh_az_config(self):
+        self.org_tenant()
+        self.mint(jwt(ORG_TENANT))
+        dirs = self.dirs()
+        self.assertFreshConfig(dirs, self.home_config)
+        self.assertEqual(dirs["extensions"], os.path.join(self.home_config, "cliextensions"))
+        self.assertEqual(dirs["devops"], os.path.join(self.home_config, "azuredevops"))
+
+    def test_pat_runs_with_a_fresh_az_config(self):
+        self.assertFreshConfig(self.dirs(AZURE_DEVOPS_EXT_PAT=PAT), self.home_config)
+
+    def test_mint_uses_the_callers_az_config(self):
+        caller = os.path.join(self.tmp, "az-config")
+        self.org_tenant()
+        self.mint(jwt(ORG_TENANT))
+        dirs = self.dirs(AZURE_CONFIG_DIR=caller)
+        self.assertEqual(self.mints()[0]["env"]["AZURE_CONFIG_DIR"], caller)
+        self.assertFreshConfig(dirs, caller)
+        self.assertEqual(dirs["extensions"], os.path.join(caller, "cliextensions"))
+        self.assertEqual(dirs["devops"], os.path.join(caller, "azuredevops"))
+
+    def test_mint_inside_the_command_uses_the_callers_az_config(self):
+        caller = os.path.join(self.tmp, "az-config")
+        self.org_tenant()
+        self.mint(jwt(ORG_TENANT, "first"), jwt(ORG_TENANT, "second"))
+        inner = 'source "%s"; _ado_mint' % LIB
+        result = self.script("ado-exec.sh", "--", self.SHELL, "-c", inner, AZURE_CONFIG_DIR=caller)
+        self.assertOk(result)
+        self.assertEqual([m["env"]["AZURE_CONFIG_DIR"] for m in self.mints()], [caller, caller])
+
+    def test_callers_extension_and_devops_dirs_are_kept(self):
+        extensions = os.path.join(self.tmp, "extensions")
+        devops = os.path.join(self.tmp, "devops")
+        dirs = self.dirs(AZURE_DEVOPS_EXT_PAT=PAT, AZURE_EXTENSION_DIR=extensions,
+                         AZURE_DEVOPS_EXT_CONFIG_DIR=devops)
+        self.assertEqual(dirs["extensions"], extensions)
+        self.assertEqual(dirs["devops"], devops)
+
+    def test_az_in_the_command_sees_the_fresh_config(self):
+        self.route_az(["devops"], {"stdout": "{}\n"})
+        result = self.script("ado-exec.sh", "--", "az", "devops", "project", "show",
+                             AZURE_DEVOPS_EXT_PAT=PAT)
+        self.assertOk(result)
+        env = self.calls("az")[-1]["env"]
+        self.assertNotIn(env["AZURE_CONFIG_DIR"], (None, self.home_config))
+        self.assertEqual(env["AZURE_EXTENSION_DIR"], os.path.join(self.home_config, "cliextensions"))
+        self.assertEqual(env["AZURE_DEVOPS_EXT_PAT"], PAT)
+
+    def test_shared_az_config_keeps_the_callers_config(self):
+        caller = os.path.join(self.tmp, "az-config")
+        dirs = self.dirs("--shared-az-config", AZURE_DEVOPS_EXT_PAT=PAT, AZURE_CONFIG_DIR=caller)
+        self.assertEqual(dirs["config"], caller)
+        self.assertIsNone(dirs["extensions"])
+        self.assertIsNone(dirs["devops"])
+
+    def test_fresh_config_is_removed_when_the_command_fails(self):
+        result = self.script("ado-exec.sh", "--", "sh", "-c", 'echo "$AZURE_CONFIG_DIR"; exit 3',
+                             AZURE_DEVOPS_EXT_PAT=PAT)
+        self.assertEqual(result.returncode, 3)
+        path = result.stdout.strip()
+        self.assertTrue(path.startswith(self.tmp + os.sep), path)
+        self.assertFalse(os.path.exists(path))
+
 
 def _shells():
     found = {}
@@ -654,6 +746,6 @@ def _major(shell):
 
 
 for _shell in _shells():
-    for _group in (AuthResolution, MintErrors, Responses, Scripts, Exec):
+    for _group in (AuthResolution, MintErrors, Responses, Scripts, Exec, ExecAzConfig):
         _name = "%sBash%s" % (_group.__name__, _major(_shell))
         globals()[_name] = type(_name, (_group, unittest.TestCase), {"SHELL": _shell})

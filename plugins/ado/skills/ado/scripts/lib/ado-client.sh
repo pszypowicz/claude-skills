@@ -116,6 +116,17 @@ _ado_use_bearer() {
   ADO_AUTH_HEADER="Authorization: Bearer $1"
 }
 
+# Run az against the caller's az login. ado-exec.sh gives its command an
+# empty AZURE_CONFIG_DIR and names the caller's config in ADO_AZ_CONFIG_DIR,
+# so a script inside the wrapper still mints from the caller's account.
+_ado_az() {
+  if [[ -n "${ADO_AZ_CONFIG_DIR:-}" ]]; then
+    AZURE_CONFIG_DIR="$ADO_AZ_CONFIG_DIR" az "$@"
+  else
+    az "$@"
+  fi
+}
+
 _ado_explain_mint_failure() {
   local out="$1" tenant_flag="" home=""
   if [[ -n "$_ADO_TENANT_ID" ]]; then
@@ -123,7 +134,7 @@ _ado_explain_mint_failure() {
   fi
   case "$out" in
     *AADSTS700082*)
-      home=$(az account show --query tenantId -o tsv 2>/dev/null) || home=""
+      home=$(_ado_az account show --query tenantId -o tsv 2>/dev/null) || home=""
       log_error "The az login session expired after going unused (AADSTS700082). Sign in again with: az login --tenant ${home:-<your subscription tenant>}"
       ;;
     *AADSTS50020*|*AADSTS90072*)
@@ -159,7 +170,7 @@ _ado_mint() {
   # stderr is kept to explain a failure. On success the token is the only
   # JWT-shaped line, whatever warnings az prints around it.
   local out line token=""
-  if ! out=$(az "${args[@]}" 2>&1); then
+  if ! out=$(_ado_az "${args[@]}" 2>&1); then
     _ado_explain_mint_failure "$out"
     return 1
   fi

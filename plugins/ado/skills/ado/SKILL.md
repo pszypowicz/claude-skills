@@ -51,6 +51,8 @@ sequester env exec <org> -- bash -c '
 
 Single-quote the block so the PAT never touches the calling shell. Each `env exec` is one profile read and may require a Touch ID tap from the user, so batch every command that needs credentials into one block per exec rather than wrapping commands individually. The bundled scripts read the same variables and run the same way, with the export line before the script call.
 
+The `az` commands in that block can still run as a signed-in `az login` account instead of the PAT, because the `az devops` extension tries those accounts first. To rule that out, run the block through `ado-exec.sh` inside the exec: `sequester env exec <org> -- ${CLAUDE_SKILL_DIR}/scripts/ado-exec.sh --org https://dev.azure.com/<org> -- bash -c '...'` (see "az CLI token fallback" below).
+
 Multi-org falls out of the naming: each org is its own profile, one block binds one org, and a cross-org task (for example a migration) reads in one exec and writes in another. A profile holding the full `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT` triple also works - the exec injects all three and the export line is unnecessary.
 
 ### az CLI token fallback (no PAT exported)
@@ -61,7 +63,9 @@ Once org and project are known, auth resolves in this order (mirrors `scripts/li
 2. **`ADO_TOKEN`** - pre-minted Entra access token; curl uses Bearer auth.
 3. **az CLI login** - no credential env vars needed, requires a prior `az login`. The token is minted for the Entra tenant that backs the org, which can differ from the tenant of your Azure subscriptions.
 
-Under the az login fallback, run each command block through `ado-exec.sh`. It mints the token and exports it to the wrapped command only, as `ADO_TOKEN`, as `AZURE_DEVOPS_EXT_PAT` for the `az devops`, `az repos`, `az pipelines`, `az boards` and `az artifacts` commands, and as `ADO_AUTH_HEADER` for curl. The wrapper writes nothing to disk, and the calling shell never sees the token. With a PAT exported, the wrapper runs the command unchanged. The `az devops` extension tries cached `az login` accounts before the exported token, so if several accounts are signed in to `az`, an `az` command can run as a different identity than curl (see `reference.md`). Batch the commands into one block per run, as with a sequester exec:
+Under the az login fallback, run each command block through `ado-exec.sh`. It mints the token and exports it to the wrapped command only, as `ADO_TOKEN`, as `AZURE_DEVOPS_EXT_PAT` for the `az devops`, `az repos`, `az pipelines`, `az boards` and `az artifacts` commands, and as `ADO_AUTH_HEADER` for curl. With a PAT exported, the wrapper uses the PAT as it is. The wrapper writes no credential to disk, and the calling shell never sees the token.
+
+The `az devops` extension tries cached `az login` accounts before the exported credential, so with several accounts signed in to `az`, an `az` command could run as a different identity than curl. The wrapper prevents this by running the command with `AZURE_CONFIG_DIR` set to an empty temporary directory, which it removes afterwards. The `az` commands in the block then find no `az login` account and run as the exported credential. Azure resource commands such as `az account` need your login, so pass `--shared-az-config` for a block that runs them. The `az devops` commands in that block can then pick another signed-in account again (see `reference.md`). Batch the commands into one block per run, as with a sequester exec:
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/ado-exec.sh -- bash -c '
@@ -696,6 +700,6 @@ When the user asks for an ADO operation:
 
 For detailed reference material and real output examples, consult:
 
-- **`reference.md`** - Full az CLI flag tables, JMESPath query patterns, REST API details for environments/checks/approvals, work item comments, PR comment threads, work item field reference, identity resolution cascade, policy type GUIDs, authentication internals (how the az devops extension picks a credential, tenant lookup, mint errors, why not `az login --allow-no-subscriptions`), native ArtifactTool on Apple Silicon
+- **`reference.md`** - Full az CLI flag tables, JMESPath query patterns, REST API details for environments/checks/approvals, work item comments, PR comment threads, work item field reference, identity resolution cascade, policy type GUIDs, authentication internals (how the az devops extension picks a credential, how `ado-exec.sh` keeps `az` on the exported credential, tenant lookup, mint errors, why not `az login --allow-no-subscriptions`), native ArtifactTool on Apple Silicon
 - **`examples.md`** - Real output samples for all major commands (PR list/show/policy, pipeline list/runs, run tree, work item JSON, query results, task logs, PR threads, work item comments, code suggestions)
 - **`examples/project-claude-ado.md`** - Template for project-specific ADO configuration (custom fields, work item types, area/iteration paths) to add to your CLAUDE.md
