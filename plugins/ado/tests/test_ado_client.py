@@ -570,6 +570,107 @@ class Scripts(Fixture):
         self.assertEqual(len(self.discoveries()), 1)
 
 
+# A response this size cannot reach a child process as a command-line argument.
+OVER_ARG_MAX = os.sysconf("SC_ARG_MAX") + 1
+VSSPS = "https://vssps.dev.azure.com/example-org/_apis/graph"
+REVIEWER = "33333333-4444-5555-6666-777777777777"
+
+
+def padded(doc):
+    """Return doc as JSON, with a filler field that makes it OVER_ARG_MAX long."""
+    return json.dumps(dict(doc, padding="x" * OVER_ARG_MAX))
+
+
+def timeline(*records):
+    return padded({"records": [dict({"order": i}, **r) for i, r in enumerate(records)]})
+
+
+def users(*names):
+    """Return a padded Graph users response that starts with a byte order mark."""
+    return "\ufeff" + padded({"value": [
+        {"displayName": n, "mailAddress": n.lower().replace(" ", ".") + "@example.com",
+         "descriptor": "aad." + n.replace(" ", "")} for n in names]})
+
+
+class LargeResponses(Fixture):
+    def setUp(self):
+        super().setUp()
+        self.env["AZURE_DEVOPS_EXT_PAT"] = PAT
+
+    def run_with_large_timeline(self, *args):
+        self.route_curl("/_apis/build/builds/7/timeline", ok(timeline(
+            {"id": "s1", "type": "Stage", "name": "plan", "result": "failed"},
+            {"id": "p1", "type": "Phase", "parentId": "s1"},
+            {"id": "j1", "type": "Job", "parentId": "p1", "name": "terraform", "result": "failed"},
+        )))
+        self.route_curl("/_apis/build/builds/7", ok('{"buildNumber": "20261104.1", "definition": {"name": "ci"}}'))
+        return self.script("ado-get-run.sh", "--run-id", "7", *args)
+
+    def test_get_run_prints_a_timeline_over_arg_max(self):
+        result = self.run_with_large_timeline()
+        self.assertOk(result)
+        self.assertIn("Run #20261104.1   ci", result.stdout)
+        self.assertIn("[failed   ] Job terraform", result.stdout)
+        self.assertIn("/_build/results?buildId=7", result.stdout)
+
+    def test_get_run_json_merges_a_timeline_over_arg_max(self):
+        result = self.run_with_large_timeline("--json")
+        self.assertOk(result)
+        run = json.loads(result.stdout)
+        self.assertEqual(run["buildNumber"], "20261104.1")
+        self.assertEqual([r["type"] for r in run["_timeline"]], ["Stage", "Phase", "Job"])
+
+    def test_get_logs_reads_a_timeline_and_log_over_arg_max(self):
+        self.route_curl("/_apis/build/builds/7/timeline", ok(timeline(
+            {"type": "Task", "name": "init", "result": "succeeded", "log": {"id": 2}},
+            {"type": "Task", "name": "plan", "result": "failed", "log": {"id": 3}},
+        )))
+        log = "x" * OVER_ARG_MAX + "\nPlan: 1 to add\nError: quota exceeded\n"
+        self.route_curl("/_apis/build/builds/7/logs/3", ok(log, content_type="text/plain"))
+        result = self.script("ado-get-logs.sh", "--run-id", "7", "--failed-only", "--tail", "2", "--json")
+        self.assertOk(result)
+        self.assertEqual(json.loads(result.stdout), [{
+            "task": "plan", "result": "failed", "log_id": 3,
+            "lines": ["Plan: 1 to add", "Error: quota exceeded"],
+        }])
+
+    def test_pr_threads_reads_a_thread_list_over_arg_max(self):
+        self.route_curl("/_apis/git/repositories/infra/pullRequests/5/threads", ok(padded({"value": [
+            {"id": 11, "status": "active", "threadContext": {"filePath": "/main.tf"},
+             "comments": [{"author": {"displayName": "Dev"}, "content": "Pin the provider"}]},
+            {"id": 12, "status": "fixed", "comments": [{"content": "Done"}]},
+        ]})))
+        result = self.script("ado-pr-threads.sh", "--pr-id", "5", "--repo", "infra", "--status", "active")
+        self.assertOk(result)
+        self.assertIn("Pin the provider", result.stdout)
+        self.assertNotIn("Done", result.stdout)
+
+    def test_create_policy_resolves_a_reviewer_from_users_over_arg_max(self):
+        self.route_curl(VSSPS + "/users", ok(users("Other User", "Jane Doe")))
+        self.route_curl(VSSPS + "/storagekeys/aad.JaneDoe", ok('{"value": "%s"}' % REVIEWER))
+        self.route_curl("/_apis/git/repositories/infra", ok('{"id": "repo-1"}'))
+        self.route_curl("/_apis/policy/configurations", ok(json.dumps({
+            "id": 42, "isBlocking": True,
+            "settings": {"requiredReviewerIds": [REVIEWER], "scope": [{"refName": "refs/heads/main"}]},
+        })))
+        result = self.script("ado-create-policy.sh", "--repo", "infra", "--type", "required-reviewer",
+                             "--reviewer", "jane.doe@example.com")
+        self.assertOk(result)
+        self.assertIn("Created policy #42", result.stdout)
+        post = [c for c in self.calls("curl") if c["method"] == "POST"][0]
+        self.assertEqual(json.loads(post["data"])["settings"]["requiredReviewerIds"], [REVIEWER])
+
+    def test_create_policy_lists_users_and_teams_when_the_reviewer_is_unknown(self):
+        self.route_curl(VSSPS + "/users", ok(users("Jane Doe")))
+        self.route_curl("/_apis/projects/%s/teams" % PROJECT, ok('{"value": [{"id": "t1", "name": "Platform"}]}'))
+        result = self.script("ado-create-policy.sh", "--repo", "infra", "--type", "required-reviewer",
+                             "--reviewer", "nobody")
+        self.assertFailed(result)
+        self.assertIn("Could not resolve reviewer: nobody", result.stderr)
+        self.assertIn("Jane Doe  [jane.doe@example.com]", result.stderr)
+        self.assertIn("t1  Platform", result.stderr)
+
+
 class Exec(Fixture):
     def dumped(self, result):
         self.assertOk(result)
@@ -746,6 +847,6 @@ def _major(shell):
 
 
 for _shell in _shells():
-    for _group in (AuthResolution, MintErrors, Responses, Scripts, Exec, ExecAzConfig):
+    for _group in (AuthResolution, MintErrors, Responses, Scripts, LargeResponses, Exec, ExecAzConfig):
         _name = "%sBash%s" % (_group.__name__, _major(_shell))
         globals()[_name] = type(_name, (_group, unittest.TestCase), {"SHELL": _shell})

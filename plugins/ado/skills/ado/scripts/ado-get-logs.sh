@@ -45,12 +45,13 @@ ado_resolve_auth
 log_info "Fetching timeline for run #${RUN_ID}..."
 timeline_json=$(ado_api GET "build/builds/${RUN_ID}/timeline")
 
-# Extract matching tasks as TSV: logId\tresult\tname
-task_tsv=$(python3 -c "
+# Extract matching tasks as TSV: logId\tresult\tname. The timeline and log
+# text go to python on stdin, because they can exceed the argument size limit.
+task_tsv=$(printf '%s' "$timeline_json" | python3 -c "
 import sys, json
-tl = json.loads(sys.argv[1])
-failed_only = sys.argv[2] == 'true'
-task_filter = sys.argv[3].lower()
+tl = json.load(sys.stdin)
+failed_only = sys.argv[1] == 'true'
+task_filter = sys.argv[2].lower()
 
 records = tl.get('records', [])
 tasks = [r for r in records if r.get('type') == 'Task' and (r.get('log') or {}).get('id')]
@@ -65,7 +66,7 @@ for t in tasks:
     if task_filter and task_filter not in name.lower():
         continue
     print(f'{log_id}\t{result}\t{name}')
-" "$timeline_json" "$FAILED_ONLY" "$TASK_FILTER")
+" "$FAILED_ONLY" "$TASK_FILTER")
 
 if [[ -z "$task_tsv" ]]; then
   log_info "No matching tasks found."
@@ -83,19 +84,19 @@ if [[ "$JSON" == true ]]; then
   first=true
   while IFS=$'\t' read -r log_id result name; do
     log_text=$(ado_api GET "build/builds/${RUN_ID}/logs/${log_id}")
-    item=$(python3 -c "
+    item=$(printf '%s' "$log_text" | python3 -c "
 import sys, json
-lines = sys.argv[1].splitlines()
-tail = int(sys.argv[2])
+lines = sys.stdin.buffer.read().decode('utf-8', 'replace').splitlines()
+tail = int(sys.argv[1])
 if tail > 0 and len(lines) > tail:
     lines = lines[-tail:]
 print(json.dumps({
-    'task': sys.argv[3],
-    'result': sys.argv[4],
-    'log_id': int(sys.argv[5]),
+    'task': sys.argv[2],
+    'result': sys.argv[3],
+    'log_id': int(sys.argv[4]),
     'lines': lines
 }))
-" "$log_text" "$TAIL" "$name" "$result" "$log_id")
+" "$TAIL" "$name" "$result" "$log_id")
     if [[ "$first" == true ]]; then
       first=false
     else
