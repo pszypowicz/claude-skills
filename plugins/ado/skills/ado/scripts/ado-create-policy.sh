@@ -79,6 +79,8 @@ ado_resolve_auth
 # Accepts: raw GUID, email address, display name, or team name.
 # Users: Graph users API -> descriptor -> Storage Keys API -> GUID
 # Teams: Teams API -> id (already a GUID)
+# Responses go to python on stdin, because a large org's user list can
+# exceed the argument size limit.
 resolve_reviewer() {
   local search="$1"
 
@@ -99,15 +101,15 @@ resolve_reviewer() {
 
   if [[ -n "$users_result" ]]; then
     local descriptor
-    descriptor=$(python3 -c "
+    descriptor=$(printf '%s' "$users_result" | python3 -c "
 import sys, json
-raw = sys.argv[1].lstrip('\ufeff')
+raw = sys.stdin.read().lstrip('\ufeff')
 try:
     data = json.loads(raw)
 except (json.JSONDecodeError, ValueError):
     sys.exit(1)
 users = data.get('value', [])
-search = sys.argv[2].lower()
+search = sys.argv[1].lower()
 
 # Exact email match
 for u in users:
@@ -122,7 +124,7 @@ for u in users:
         sys.exit(0)
 
 sys.exit(1)
-" "$users_result" "$search" 2>/dev/null) || true
+" "$search" 2>/dev/null) || true
 
     # Convert descriptor to storage key (GUID)
     if [[ -n "$descriptor" ]]; then
@@ -130,14 +132,14 @@ sys.exit(1)
       sk_result=$(ado_request GET "${vssps_base}/_apis/graph/storagekeys/${descriptor}?api-version=7.1-preview.1") || true
 
       local guid
-      guid=$(python3 -c "
+      guid=$(printf '%s' "$sk_result" | python3 -c "
 import sys, json
 try:
-    data = json.loads(sys.argv[1].lstrip('\ufeff'))
+    data = json.loads(sys.stdin.read().lstrip('\ufeff'))
     print(data['value'])
 except Exception:
     sys.exit(1)
-" "$sk_result" 2>/dev/null) || true
+" 2>/dev/null) || true
 
       if [[ -n "$guid" ]]; then
         echo "$guid"
@@ -154,20 +156,20 @@ except Exception:
 
   if [[ -n "$teams_result" ]]; then
     local resolved
-    resolved=$(python3 -c "
+    resolved=$(printf '%s' "$teams_result" | python3 -c "
 import sys, json
-raw = sys.argv[1].lstrip('\ufeff')
+raw = sys.stdin.read().lstrip('\ufeff')
 try:
     data = json.loads(raw)
 except (json.JSONDecodeError, ValueError):
     sys.exit(1)
-search = sys.argv[2].lower()
+search = sys.argv[1].lower()
 for t in data.get('value', []):
     if t.get('name', '').lower() == search:
         print(t['id'])
         sys.exit(0)
 sys.exit(1)
-" "$teams_result" "$search" 2>/dev/null) || true
+" "$search" 2>/dev/null) || true
 
     if [[ -n "$resolved" ]]; then
       echo "$resolved"
@@ -175,14 +177,16 @@ sys.exit(1)
     fi
   fi
 
-  # Nothing found - list available users and teams
-  python3 -c "
+  # Nothing found - list available users and teams. Bash strings cannot hold
+  # NUL, so NUL separates the two responses.
+  printf '%s\0%s' "$users_result" "$teams_result" | python3 -c "
 import sys, json
 
 print('Could not resolve reviewer: ' + sys.argv[1], file=sys.stderr)
+users_raw, teams_raw = sys.stdin.read().split('\0')
 
 try:
-    users = json.loads(sys.argv[2].lstrip('\ufeff')).get('value', [])
+    users = json.loads(users_raw.lstrip('\ufeff')).get('value', [])
     if users:
         print('Available users:', file=sys.stderr)
         for u in users:
@@ -193,14 +197,14 @@ except Exception:
     pass
 
 try:
-    teams = json.loads(sys.argv[3].lstrip('\ufeff')).get('value', [])
+    teams = json.loads(teams_raw.lstrip('\ufeff')).get('value', [])
     if teams:
         print('Available teams:', file=sys.stderr)
         for t in teams:
             print(f'  {t[\"id\"]}  {t[\"name\"]}', file=sys.stderr)
 except Exception:
     pass
-" "$search" "${users_result:-{}}" "${teams_result:-{}}" >&2
+" "$search" >&2
   return 1
 }
 
@@ -321,14 +325,14 @@ result=$(ado_api POST "policy/configurations" "$body")
 if [[ "$JSON" == true ]]; then
   echo "$result" | python3 -m json.tool
 else
-  python3 -c "
+  printf '%s' "$result" | python3 -c "
 import sys, json
-cfg = json.loads(sys.argv[1])
+cfg = json.load(sys.stdin)
 cid = cfg['id']
 blocking = 'blocking' if cfg.get('isBlocking') else 'advisory'
 scope = cfg.get('settings', {}).get('scope', [{}])[0]
 ref = scope.get('refName', '?')
-ptype = sys.argv[2]
+ptype = sys.argv[1]
 
 if ptype == 'build':
     name = cfg.get('settings', {}).get('displayName', '')
@@ -353,5 +357,5 @@ elif ptype == 'required-reviewer':
     if patterns:
         pat_str = ', '.join(patterns)
         print(f'  File patterns:    {pat_str}')
-" "$result" "$TYPE"
+" "$TYPE"
 fi

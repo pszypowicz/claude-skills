@@ -41,21 +41,21 @@ log_info "Fetching run #${RUN_ID}..."
 run_json=$(ado_api GET "build/builds/${RUN_ID}")
 timeline_json=$(ado_api GET "build/builds/${RUN_ID}/timeline")
 
+# The documents go to python on stdin, because a large timeline can exceed
+# the argument size limit. Bash strings cannot hold NUL, so NUL separates them.
 if [[ "$JSON" == true ]]; then
-  python3 -c "
+  printf '%s\0%s' "$run_json" "$timeline_json" | python3 -c "
 import sys, json
-run = json.loads(sys.argv[1])
-tl = json.loads(sys.argv[2])
+run, tl = (json.loads(doc) for doc in sys.stdin.read().split('\0'))
 run['_timeline'] = tl.get('records', [])
 print(json.dumps(run, indent=2))
-" "$run_json" "$timeline_json"
+"
 else
-  python3 -c "
+  printf '%s\0%s' "$run_json" "$timeline_json" | python3 -c "
 import sys, json
 from datetime import datetime
 
-run = json.loads(sys.argv[1])
-tl = json.loads(sys.argv[2])
+run, tl = (json.loads(doc) for doc in sys.stdin.read().split('\0'))
 records = tl.get('records', [])
 
 build_number = run.get('buildNumber', '?')
@@ -119,7 +119,7 @@ for stage in stages:
     for job in children:
         print(f'    {fmt_result(job)} Job {job.get(\"name\", \"?\")}')
 
-web_url = f'{sys.argv[3]}/_build/results?buildId={sys.argv[4]}'
+web_url = f'{sys.argv[1]}/_build/results?buildId={sys.argv[2]}'
 print(f'  Web: {web_url}')
-" "$run_json" "$timeline_json" "${ADO_ORG}/${ADO_PROJECT}" "$RUN_ID"
+" "${ADO_ORG}/${ADO_PROJECT}" "$RUN_ID"
 fi

@@ -47,13 +47,15 @@ log_info "Fetching threads for PR #${PR_ID} in ${REPO}..."
 
 threads_json=$(ado_api GET "git/repositories/${REPO}/pullRequests/${PR_ID}/threads")
 
-python3 -c "
+# The threads go to python on stdin, because they can exceed the argument
+# size limit.
+printf '%s' "$threads_json" | python3 -c "
 import sys, json
 
-data = json.loads(sys.argv[1])
-status_filter = sys.argv[2]
-file_filter = sys.argv[3]
-output_json = sys.argv[4] == 'true'
+data = json.load(sys.stdin)
+status_filter = sys.argv[1]
+file_filter = sys.argv[2]
+output_json = sys.argv[3] == 'true'
 
 threads = data.get('value', [])
 
@@ -103,4 +105,4 @@ for t in threads:
     reply_count = len(comments) - 1
 
     print(f'{tid:<10} {status:<10} {file_line:<35} {author:<25} {reply_count:<8} {snippet}')
-" "$threads_json" "$STATUS" "$FILE_FILTER" "$JSON"
+" "$STATUS" "$FILE_FILTER" "$JSON"
