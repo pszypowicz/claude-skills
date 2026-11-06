@@ -263,7 +263,7 @@ az pipelines delete --id <id> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
 
 ### Run specific stages only (skip others)
 
-`az pipelines run` does not expose `stagesToSkip`. Use the `/pipelines/{id}/runs` REST endpoint directly. Stages listed in `stagesToSkip` end `skipped`, and downstream stages that depend on them run **as if the upstream succeeded** - so this is the correct way to rerun e.g. only a cleanup/destroy stage after a canceled apply, without editing the pipeline YAML or adding approval gates.
+`az pipelines run` does not expose `stagesToSkip`. Use the `/pipelines/{id}/runs` REST endpoint directly. Stages listed in `stagesToSkip` end `skipped`, and each stage that depended on a skipped stage is rewired to depend on the skipped stage's upstream. A downstream stage with the **default condition** therefore runs as if the skipped stage succeeded. That makes this the way to rerun only a cleanup or destroy stage after a canceled apply, as long as that stage keeps the default condition.
 
 ```bash
 # Identifier is the YAML `- stage: <id>`, not the displayName. Grab it from a
@@ -277,7 +277,28 @@ curl -sS -H "$AUTH" -X POST \
   }'
 ```
 
-Common use case: previous BVP run was canceled mid-apply, leaving an orphan resource group in state. Skip every upstream stage and let only `TerraformDestroy` run - it reads the existing state backend and tears down what the canceled apply created.
+Common use case: a previous run was canceled mid-apply, leaving an orphan resource group in state. Skip every upstream stage and let only `TerraformDestroy` run - it reads the existing state backend and tears down what the canceled apply created.
+
+The rewiring does not change a condition that names a stage. When a stage's condition names a skipped stage, as in `condition: succeeded('deploy')`, the condition is false and that stage is skipped too, so the run can finish `succeeded` with every stage skipped. To run such a stage on its own, give the pipeline a parameter that lets the condition pass, and set it in the same request:
+
+```yaml
+parameters:
+  - name: uninstallOnly
+    type: boolean
+    default: false
+
+stages:
+  # ... the diff and deploy stages
+  - stage: uninstall
+    condition: or(eq('${{ parameters.uninstallOnly }}', 'true'), succeeded('deploy'))
+```
+
+```json
+{
+  "stagesToSkip": ["diff", "deploy"],
+  "templateParameters": { "uninstallOnly": "true" }
+}
+```
 
 Contrast with cancellation cascade (which is _not_ overridden by `stagesToSkip` on a running build): when a running build is canceled, the upstream ends `Canceled` and downstream defaults to `Skipped` via the implicit `succeeded()` condition. No rerun button appears on the skipped stage. The fix there is a fresh queue with `stagesToSkip` as above, **not** re-running within the canceled build.
 

@@ -63,10 +63,18 @@ def parse_config(text):
     return pairs
 
 
+def read_source(name):
+    """Return the contents of a curl file argument, where "-" is stdin."""
+    if name == "-":
+        return sys.stdin.read()
+    with open(name) as f:
+        return f.read()
+
+
 def curl(argv):
     opts = {"headers": [], "method": None, "data": None, "output": None,
             "dump_header": None, "write_out": None, "url": None}
-    stdin_config = ""
+    config = ""
     i = 0
     while i < len(argv):
         arg = argv[i]
@@ -78,15 +86,15 @@ def curl(argv):
             elif arg in ("-X", "--request"):
                 opts["method"] = value
             elif arg in ("-d", "--data", "--data-raw", "--data-binary"):
-                opts["data"] = value
+                opts["data"] = (arg, value)
             elif arg in ("-o", "--output"):
                 opts["output"] = value
             elif arg in ("-D", "--dump-header"):
                 opts["dump_header"] = value
             elif arg in ("-w", "--write-out"):
                 opts["write_out"] = value
-            elif arg in ("-K", "--config") and value == "-":
-                stdin_config = sys.stdin.read()
+            elif arg in ("-K", "--config"):
+                config = read_source(value)
             continue
         if arg.startswith("-"):
             i += 1
@@ -94,7 +102,16 @@ def curl(argv):
         opts["url"] = arg
         i += 1
 
-    for name, value in parse_config(stdin_config):
+    if opts["data"] is not None:
+        arg, value = opts["data"]
+        if arg != "--data-raw" and value.startswith("@"):
+            value = read_source(value[1:])
+            if arg != "--data-binary":
+                # Like curl, -d drops carriage returns and newlines from a file.
+                value = value.replace("\r", "").replace("\n", "")
+        opts["data"] = value
+
+    for name, value in parse_config(config):
         if name == "header":
             opts["headers"].append(value)
         elif name == "url":
