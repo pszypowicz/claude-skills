@@ -515,7 +515,7 @@ Signing in to the tenant of your subscriptions finds the same subscriptions agai
 
 ### Response handling in the bundled scripts
 
-`ado_request` in `scripts/lib/ado-client.sh` sends every REST call. It passes the credential to curl through stdin (`curl -K -`), which keeps it out of the process list.
+`ado_request` in `scripts/lib/ado-client.sh` sends every REST call. It passes the credential to curl through a pipe (`curl -K <(...)`), which keeps it out of the process list. The request body goes in on stdin (`--data-binary @-`), so a large body, such as a work item description with inline images, stays clear of the argument size limit.
 
 - A 401, or a redirect to a sign-in page, means the credential was rejected before the request ran. On a read (GET or HEAD), any redirect and any HTML page in a 2xx answer count as a rejection too.
 - A rejected token minted from `az login` is minted again and the request retried once. That holds for writes too, because a rejected request never ran. A token that `ado-exec.sh` minted carries the `ADO_TOKEN_MINTED=1` marker and is treated the same way.

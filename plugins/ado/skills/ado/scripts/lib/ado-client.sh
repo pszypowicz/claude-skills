@@ -230,13 +230,16 @@ _ado_refresh_if_expiring() {
 # and _ADO_HTTP_BODY. Fails only when curl gets no HTTP response.
 _ado_send() {
   local method="$1" url="$2" body="$3" resp meta
-  local -a args=(-sS -K - -X "$method" -H "Content-Type: application/json"
+  local -a args=(-sS -X "$method" -H "Content-Type: application/json"
     -w '\n%{http_code}\t%{redirect_url}\t%{content_type}')
   if [[ -n "$body" ]]; then
-    args+=(-d "$body")
+    args+=(--data-binary @-)
   fi
-  # The credential goes in through stdin to keep it out of the process list.
-  if ! resp=$(printf 'header = "%s"\n' "$ADO_AUTH_HEADER" | curl "${args[@]}" "$url"); then
+  # The credential goes in through a pipe to keep it out of the process list,
+  # and the body through stdin, because a body can exceed the argument size
+  # limit.
+  if ! resp=$(printf '%s' "$body" \
+      | curl -K <(printf 'header = "%s"\n' "$ADO_AUTH_HEADER") "${args[@]}" "$url"); then
     log_error "No response from ${method} ${url}"
     return 1
   fi

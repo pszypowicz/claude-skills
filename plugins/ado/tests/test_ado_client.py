@@ -144,8 +144,8 @@ class Fixture(_Base):
                 full[key] = value
         return subprocess.run(cmd, env=full, input=stdin, capture_output=True, text=True, timeout=120)
 
-    def lib(self, body, **env):
-        return self.run_cmd([self.SHELL, "-c", 'source "%s"\n%s' % (LIB, body)], **env)
+    def lib(self, body, stdin=None, **env):
+        return self.run_cmd([self.SHELL, "-c", 'source "%s"\n%s' % (LIB, body)], stdin=stdin, **env)
 
     def script(self, name, *args, stdin=None, **env):
         return self.run_cmd([self.SHELL, os.path.join(SCRIPTS, name)] + list(args), stdin=stdin, **env)
@@ -513,8 +513,18 @@ class Responses(Fixture):
         call = self.calls("curl")[0]
         self.assertEqual(call["method"], "POST")
         self.assertEqual(call["data"], '{"text":"hi"}')
+        self.assertNotIn('{"text":"hi"}', " ".join(call["argv"]))
         self.assertEqual(call["headers"]["content-type"], "application/json")
         self.assertTrue(call["url"].endswith("/comments?api-version=7.1"))
+
+    def test_body_over_arg_max_is_sent_unchanged(self):
+        body = json.dumps({"text": "x" * OVER_ARG_MAX, "lines": ["a", "b"]}, indent=2)
+        self.route_curl("/_apis/wit/workItems/7/comments", ok('{"id": 1}'))
+        result = self.lib('ado_require_env; ado_api POST wit/workItems/7/comments "$(cat)"',
+                          stdin=body, AZURE_DEVOPS_EXT_PAT=PAT)
+        self.assertOk(result)
+        self.assertEqual(result.stdout, '{"id": 1}')
+        self.assertEqual(self.calls("curl")[0]["data"], body)
 
 
 class Scripts(Fixture):
