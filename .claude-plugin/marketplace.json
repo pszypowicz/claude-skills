@@ -60,7 +60,7 @@
       "name": "ha-integration-upgrade",
       "source": "./plugins/ha-integration-upgrade",
       "description": "Move a Home Assistant custom integration to the next core release, one minor at a time, and use each release to adopt new core helpers and simplify the code.",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "tags": ["home-assistant", "custom-integration", "upgrade", "deprecations", "python"]
     }
   ]

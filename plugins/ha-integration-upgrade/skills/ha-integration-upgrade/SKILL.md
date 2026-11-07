@@ -42,9 +42,18 @@ query for every source below, and where each one misleads.
 1. **Map the surface.** List the platforms the integration implements, every
    `homeassistant.*` name it imports or calls, the core components in its
    `dependencies` or imports, its `manifest.json` keys, and the test package
-   and fixtures its tests use. Every candidate is checked against this list.
-2. **Fetch core.** Run `scripts/fetch-core.sh --from <from> --to <to>`. It
-   prints the cache repository, the tag dates, and a blog window.
+   and fixtures its tests use. Note whether it ships frontend code: a card or
+   panel built from a `frontend/` folder, `add_extra_js_url`, or `frontend` in
+   `dependencies` or `after_dependencies`. List its local workarounds of core
+   or frontend behavior too: comments that describe how upstream behaves,
+   references to upstream issues or PRs, version checks, polyfills and
+   monkeypatches. Every candidate is checked against this list. Every
+   workaround is checked at `$TO`, because a release that fixes the upstream
+   behavior turns it into dead code.
+2. **Fetch core** once for the whole chain:
+   `scripts/fetch-core.sh --from <pin> --to <target>`. It prints the cache
+   repository, the tag dates, and one line per step with its commit count and
+   blog window.
 3. **Collect candidates** from the cheap indexes, not from whole diffs:
    - `scripts/blog-posts.sh --since <a> --until <b>` with the printed window.
      Read in full every post whose title or description comes near the
@@ -57,18 +66,31 @@ query for every source below, and where each one misleads.
      for any new name that looks like an idiom core swept its own code onto.
    - The diffs of the hassfest manifest schema, the scaffold templates, and
      the type-hint checker of core's pylint plugin.
+   - When the integration ships frontend code, the notes of every frontend
+     release the step brings in (`scripts/frontend-releases.sh --from "$FROM"
+     --to "$TO"`), grepped for the frontend APIs and elements the code uses,
+     and the blog's `frontend` area. Frontend PRs rarely carry a label a
+     search would find.
+   - Marketplace-area posts that change how users install or update an
+     integration. Check the README's install section against them (the
+     button, the add-from-link path, prerequisites, whether a restart is
+     needed). A stale install section is a finding a user sees.
 4. **Run the gate on both pins.** Leave the repo's working tree alone during
    the report phase. Work in a clone (`git clone <checkout> <tmp-dir>`), not a
    worktree, which writes into the checkout's `.git`.
    - Run the type checkers and the test suite on `$FROM` first, in the repo's
      venv or one built for it. That baseline tells a failure of this step
      apart from one the repo already had.
-   - Build a venv at `$TO` with its matching test package. When the test
-     package changed (see sources.md), port the clone to it first, or the
-     suite fails at plugin load and shows nothing else.
-   - Write warnings to a file, because pytest prints captured logs only for
-     failing tests: `--log-file=<path> --log-file-level=WARNING`. Diff that
-     file against the `$FROM` run.
+   - Build a venv at `$TO` with its matching test package, the release that
+     pins the step's tag exactly. When the test package changed (see
+     sources.md), port the clone to it first, or the suite fails at plugin
+     load and shows nothing else. Diff the `Requires-Dist` of the old and new
+     test package, because a pytest plugin the old one pulled in may now need
+     a pin of its own.
+   - Run the same pytest command on both pins, writing warnings to a file,
+     because pytest prints captured logs only for failing tests. Diff the two
+     files after normalizing them. sources.md has the command and the
+     normalizer.
    - One break can hide the rest. A single `AttributeError` can fail most of
      the suite, so apply the smallest fix in the clone and run again, until
      every remaining failure has a cause.
@@ -79,6 +101,14 @@ query for every source below, and where each one misleads.
    - The gate cannot see translations. When core moves a string to a shared
      domain (abort reasons, entity names), check that core ships it in every
      language the repo translates, or the repo's own translation stops showing.
+     Core's non-English translations ship in the wheel and not in git, so read
+     them from the `$TO` venv.
+   - Some compatibility paths log nothing, such as the re-add of an entity
+     class that has not opted in to in-place entity id changes. Read the
+     deprecation posts against the surface even when the gate is quiet.
+   - When the repo has no type checker, run `mypy` over the integration once on
+     each pin anyway and diff the two outputs. Removed names and changed
+     signatures show up even in untyped code.
 5. **Verify each candidate.** It holds at `$TO` and not at `$FROM`
    (`git -C "$CORE" grep -n <symbol> "$TO" -- <path>`), and the integration
    uses what it changes. Name our file and symbol. A candidate that does not
@@ -100,6 +130,11 @@ version, and to which release. When the integration ships through a store
 that enforces a minimum (the Marketplace reads `homeassistant` from
 `hacs.json`), a raised floor belongs in the release notes, so say so.
 
+A raised floor needs a runtime reason: an API the code calls that is missing
+before that release, or a behavior the code relies on. "The gate tests only
+`$TO`" is a choice of test pin, and the code may still run on older cores.
+When it does, say so and let the policy decide.
+
 When a break has two fixes, one that keeps the old floor and one in the target
 release's idiom, the policy picks. If it lets the floor move, use the target
 idiom (`dataclasses.replace` over a version-agnostic copy) and name the new
@@ -115,7 +150,9 @@ the integration.
 
 One section per step: a heading `$FROM -> $TO`, one line on what was consulted
 (posts read, commits indexed, the gate result on `$TO`), the four groups,
-"Checked and not affected", and "Proposed PRs". Each finding:
+"Checked and not affected", "Proposed PRs", and "Open questions" for the
+decisions only the user can make, each with its options. Do not settle such a
+decision with a default. Each finding:
 
 ```markdown
 ### 1.1 ChildDeviceInfo no longer has copy()
@@ -145,6 +182,9 @@ conversation. Do not commit it to the target repo.
   next step starts, unless the user asks to land the steps together.
 - **No compatibility or migration code** the policy forbids, however natural
   it looks.
+- **A deprecation guard.** When the test suite has no fixture that fails a
+  test on a deprecated call core reports, propose one, so the next release's
+  deprecations fail the gate and do not pass quietly.
 
 ## Cost
 
@@ -177,4 +217,6 @@ conversation. Do not commit it to the target repo.
 | Keeping a pathspec list in one zsh string     | Use an array (`paths=(a b); git log -- "${paths[@]}"`). zsh does not split `$paths`, so the query silently matches nothing.                                                                                                                             |
 | Reading the gate's output only for failures   | Log warnings to a file on both pins and diff them. Passing tests log deprecations too.                                                                                                                                                                  |
 | Removing a guard because one run passes       | Find what the guard protects against. When that varies between environments (plugin load order, platform, Python version), a green run proves nothing. Cite the core code that makes the guard redundant, or mark the finding as needing a closer look. |
+| Raising the floor because the gate tests only `$TO` | Name the runtime reason, or say that the code still runs on older cores. |
+| Reading only core for an integration with a card | The card follows the frontend's releases. Read the notes `frontend-releases.sh` prints. |
 | Applying before approval                      | Stop after the report and wait for the user's approval.                                                                                                                                                                                                 |
