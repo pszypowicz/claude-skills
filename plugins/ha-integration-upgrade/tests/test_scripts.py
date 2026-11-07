@@ -10,6 +10,10 @@ PLUGIN = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPTS = os.path.join(PLUGIN, "skills", "ha-integration-upgrade", "scripts")
 BLOG_POSTS = os.path.join(SCRIPTS, "blog-posts.sh")
 FETCH_CORE = os.path.join(SCRIPTS, "fetch-core.sh")
+FRONTEND_RELEASES = os.path.join(SCRIPTS, "frontend-releases.sh")
+GIT_ENV = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+               GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.invalid",
+               GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.invalid")
 
 
 def run(*args, env=None):
@@ -78,25 +82,21 @@ class TestBlogPosts(unittest.TestCase):
 
 
 class TestFetchCore(unittest.TestCase):
-    """A remote with dev history, two release branches, and their tags."""
+    """A remote with dev history, three release branches, and their tags."""
 
     @classmethod
     def setUpClass(cls):
         cls.root = tempfile.mkdtemp(prefix="fetch-core-")
         cls.remote = os.path.join(cls.root, "remote")
-        cls.env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
-                       GIT_AUTHOR_NAME="Test", GIT_AUTHOR_EMAIL="test@example.invalid",
-                       GIT_COMMITTER_NAME="Test", GIT_COMMITTER_EMAIL="test@example.invalid")
+        cls.env = GIT_ENV
         cls.git("init", "-q", "-b", "dev", cls.remote)
         cls.git("-C", cls.remote, "config", "uploadpack.allowFilter", "true")
-        cls.commit("2026-09-01", "Old dev work")
-        cls.commit("2026-09-30", "Cut 2026.10", tag="2026.10.0b0")
-        cls.git("-C", cls.remote, "checkout", "-q", "-b", "rc-2026.10")
-        cls.commit("2026-10-07", "2026.10.0", tag="2026.10.0")
-        cls.git("-C", cls.remote, "checkout", "-q", "dev")
-        cls.commit("2026-10-15", "Add a helper (#2)")
-        cls.commit("2026-10-28", "Cut 2026.11", tag="2026.11.0b0")
-        cls.commit("2026-11-04", "2026.11.0", tag="2026.11.0")
+        cls.commit("2026-07-01", "Old dev work")
+        cls.release("2026.9", cut="2026-08-26", ship="2026-09-02")
+        cls.commit("2026-09-10", "Add a helper (#2)")
+        cls.release("2026.10", cut="2026-09-30", ship="2026-10-07")
+        cls.commit("2026-10-15", "Add another helper (#3)")
+        cls.release("2026.11", cut="2026-10-28", ship="2026-11-04")
 
     @classmethod
     def tearDownClass(cls):
@@ -121,33 +121,71 @@ class TestFetchCore(unittest.TestCase):
         if tag:
             cls.git("-C", cls.remote, "tag", tag)
 
-    def fetch(self, *args):
-        cache = tempfile.mkdtemp(prefix="cache-", dir=self.root)
-        return run(FETCH_CORE, "--cache-dir", cache, "--remote", f"file://{self.remote}", *args, env=self.env), cache
+    @classmethod
+    def release(cls, minor, cut, ship):
+        """Cut the first beta on dev, and ship the release from its own branch."""
+        cls.commit(cut, f"Cut {minor}", tag=f"{minor}.0b0")
+        cls.git("-C", cls.remote, "checkout", "-q", "-b", f"rc-{minor}")
+        cls.commit(ship, f"{minor}.0", tag=f"{minor}.0")
+        cls.git("-C", cls.remote, "checkout", "-q", "dev")
 
-    def test_two_releases(self):
-        result, cache = self.fetch("--from", "2026.10", "--to", "2026.11")
+    def new_cache(self):
+        return tempfile.mkdtemp(prefix="cache-", dir=self.root)
+
+    def fetch(self, cache, *args):
+        return run(FETCH_CORE, "--cache-dir", cache, "--remote", f"file://{self.remote}", *args, env=self.env)
+
+    def count(self, cache, revisions):
+        return int(self.git("-C", cache, "rev-list", "--count", revisions))
+
+    def test_one_step(self):
+        cache = self.new_cache()
+        result = self.fetch(cache, "--from", "2026.10", "--to", "2026.11")
         self.assertEqual(result.returncode, 0, result.stderr)
         lines = result.stdout.splitlines()
         self.assertEqual(lines[0], f"repo: {cache}")
         dates = [line.split()[-1] for line in lines if line.startswith("tag: ")]
         self.assertEqual(dates, ["2026-09-30", "2026-10-07", "2026-10-28", "2026-11-04"])
-        self.assertIn("commits: 3 in 2026.10.0..2026.11.0", lines)
-        self.assertEqual(lines[-1], "blog-window: 2026-09-23 2026-11-18")
+        self.assertEqual(lines[-1], "step: 2026.10.0..2026.11.0 commits: 3 blog-window: 2026-09-23 2026-11-18")
         log = self.git("-C", cache, "log", "--format=%s", "2026.10.0..2026.11.0")
-        self.assertEqual(log.splitlines(), ["2026.11.0", "Cut 2026.11", "Add a helper (#2)"])
+        self.assertEqual(log.splitlines(), ["2026.11.0", "Cut 2026.11", "Add another helper (#3)"])
+
+    def test_a_chain_of_steps(self):
+        cache = self.new_cache()
+        result = self.fetch(cache, "--from", "2026.9", "--to", "2026.11")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        steps = [line for line in result.stdout.splitlines() if line.startswith("step: ")]
+        self.assertEqual(steps, [
+            "step: 2026.9.0..2026.10.0 commits: 3 blog-window: 2026-08-19 2026-10-21",
+            "step: 2026.10.0..2026.11.0 commits: 3 blog-window: 2026-09-23 2026-11-18",
+        ])
+
+    def test_a_later_step_keeps_the_history_of_an_earlier_one(self):
+        cache = self.new_cache()
+        self.assertEqual(self.fetch(cache, "--from", "2026.9", "--to", "2026.10").returncode, 0)
+        before = self.count(cache, "2026.9.0..2026.10.0")
+        result = self.fetch(cache, "--from", "2026.10", "--to", "2026.11")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.git("-C", cache, "merge-base", "2026.9.0", "2026.10.0")
+        self.assertEqual(self.count(cache, "2026.9.0..2026.10.0"), before)
 
     def test_a_second_run_reuses_the_cache(self):
-        _, cache = self.fetch("--from", "2026.10", "--to", "2026.11")
-        again = run(FETCH_CORE, "--cache-dir", cache, "--remote", f"file://{self.remote}",
-                    "--from", "2026.10.0", "--to", "2026.11.0", env=self.env)
+        cache = self.new_cache()
+        self.fetch(cache, "--from", "2026.10", "--to", "2026.11")
+        again = self.fetch(cache, "--from", "2026.10.0", "--to", "2026.11.0")
         self.assertEqual(again.returncode, 0, again.stderr)
-        self.assertIn("commits: 3 in 2026.10.0..2026.11.0", again.stdout.splitlines())
+        self.assertIn("step: 2026.10.0..2026.11.0 commits: 3 blog-window: 2026-09-23 2026-11-18",
+                      again.stdout.splitlines())
 
     def test_an_unreleased_target(self):
-        result, _ = self.fetch("--from", "2026.11", "--to", "2026.12")
+        result = self.fetch(self.new_cache(), "--from", "2026.11", "--to", "2026.12")
         self.assertEqual(result.returncode, 1)
         self.assertIn("is 2026.12.0 released?", result.stderr)
+
+    def test_a_target_before_the_source(self):
+        result = self.fetch(self.new_cache(), "--from", "2026.11", "--to", "2026.10")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--to 2026.10.0 is not after --from 2026.11.0", result.stderr)
 
     def test_not_a_version(self):
         cache = os.path.join(self.root, "never-created")
@@ -160,6 +198,74 @@ class TestFetchCore(unittest.TestCase):
         result = run(FETCH_CORE, "--to", "2026.11")
         self.assertEqual(result.returncode, 1)
         self.assertIn("--from is required", result.stderr)
+
+
+class TestFrontendReleases(unittest.TestCase):
+    """Core tags that pin two frontend versions, and a gh that knows the releases."""
+
+    RELEASES = ["20261028.10", "20261028.4", "20261028.0", "20260930.3", "20260930.2", "20260930.1"]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp(prefix="frontend-releases-")
+        cls.cache = os.path.join(cls.root, "core")
+        git = lambda *args: subprocess.run(["git", "-C", cls.cache, *args], check=True,
+                                           capture_output=True, env=GIT_ENV)
+        os.makedirs(os.path.join(cls.cache, "homeassistant", "components", "frontend"))
+        subprocess.run(["git", "init", "-q", cls.cache], check=True, env=GIT_ENV)
+        for tag, pin in (("2026.10.0", "20260930.2"), ("2026.11.0", "20261028.4"), ("2026.11.1", "20261028.4")):
+            with open(os.path.join(cls.cache, "homeassistant", "components", "frontend", "manifest.json"), "w") as f:
+                f.write('{"domain": "frontend", "requirements": ["home-assistant-frontend==%s"]}\n' % pin)
+            git("add", "-A")
+            git("commit", "-q", "--allow-empty", "-m", tag)
+            git("tag", tag)
+        cls.bin = os.path.join(cls.root, "bin")
+        os.makedirs(cls.bin)
+        gh = os.path.join(cls.bin, "gh")
+        with open(gh, "w") as f:
+            f.write("#!/usr/bin/env bash\n"
+                    'case "$1 $2" in\n'
+                    f'  "release list") printf \'%s\\n\' {" ".join(cls.RELEASES)} ;;\n'
+                    '  "release view") printf \'* Change one of %s\\n* Change two\\n\' "$3" ;;\n'
+                    '  *) echo "unexpected: $*" >&2; exit 2 ;;\n'
+                    "esac\n")
+        os.chmod(gh, 0o755)
+        cls.env = dict(GIT_ENV, PATH=cls.bin + os.pathsep + os.environ["PATH"])
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def releases(self, *args):
+        return run(FRONTEND_RELEASES, "--cache-dir", self.cache, *args, env=self.env)
+
+    def test_the_releases_a_step_brings_in(self):
+        result = self.releases("--from", "2026.10.0", "--to", "2026.11.0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "20260930.3\t* Change one of 20260930.3",
+            "20260930.3\t* Change two",
+            "20261028.0\t* Change one of 20261028.0",
+            "20261028.0\t* Change two",
+            "20261028.4\t* Change one of 20261028.4",
+            "20261028.4\t* Change two",
+        ])
+
+    def test_an_unchanged_pin(self):
+        result = self.releases("--from", "2026.11.0", "--to", "2026.11.1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("pins home-assistant-frontend 20261028.4 at both tags", result.stderr)
+
+    def test_a_tag_missing_from_the_cache(self):
+        result = self.releases("--from", "2026.9.0", "--to", "2026.10.0")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("2026.9.0", result.stderr)
+
+    def test_required_flags(self):
+        result = self.releases("--from", "2026.10.0")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--to is required", result.stderr)
 
 
 if __name__ == "__main__":

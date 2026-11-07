@@ -23,10 +23,15 @@ of `home-assistant/contributors.home-assistant.io`, with `title`,
 
 - `scripts/blog-posts.sh --since <date> --until <date>` reads the `core` and
   `marketplace` area feeds (`/blog/<area>/rss.xml`) and prints one line per
-  post, with the post URL to cite.
+  post, with the post URL to cite. Add `--area frontend` (and repeat the
+  defaults) for an integration that ships a card. For a chain of steps, one
+  query over the union of the step windows is enough, because every post is
+  verified at a tag anyway.
 - Read a post in full from its Markdown source, which is shorter than the
   page: `gh api repos/home-assistant/contributors.home-assistant.io/contents/src/content/blog/<date>-<slug>.md -H 'Accept: application/vnd.github.raw'`.
-  The file name is the post date plus the last part of its URL. The title
+  Build the file name from the URL path, `/blog/2026/10/13/device-info-class/`
+  becoming `2026-10-13-device-info-class.md`. The date in the feed can differ
+  from the one in the path. The title
   often hides the helper. "Config entry functions now return None" is
   where `async_unload_platforms_or_raise` is introduced, and no title names it.
 - A post that introduces a library or a feature set names many new things at
@@ -86,10 +91,23 @@ Paths worth indexing:
 
 - The integration's own test run on the new pin is the precise list: core
   logs a warning for each deprecated call it reaches. pytest prints captured
-  logs only for failing tests, so run with
-  `--log-file=<path> --log-file-level=WARNING` on both pins, and grep the
-  difference for `deprecated` and "will stop working". Read the pytest
-  warnings summary too.
+  logs only for failing tests, so run the same command on both pins with a
+  log file, and diff the two after removing what differs between any two
+  runs (line numbers, task numbers, addresses, durations, and the clone
+  path):
+
+  ```sh
+  python -m pytest -q -p no:cacheprovider --log-file="$LOG" --log-file-level=WARNING
+  norm() {
+    grep -E '^(WARNING|ERROR|CRITICAL) ' "$1" | sed -E \
+      -e "s#$2#CLONE#g" -e 's/:[0-9]+ /:N /' -e 's/Task-[0-9]+/Task-N/g' \
+      -e 's/0x[0-9a-f]+/0xN/g' -e 's/[0-9.]+ seconds/N seconds/g' | sort -u
+  }
+  diff <(norm "$FROM_LOG" "$FROM_CLONE") <(norm "$TO_LOG" "$TO_CLONE")
+  ```
+
+  Grep the difference for `deprecated` and "will stop working", and read the
+  pytest warnings summary too.
 - A deprecation from an earlier release that the integration never moved off
   shows up the same way. Report it with the release that introduced it.
 
@@ -146,11 +164,41 @@ report which ones were used.
   (`Requires-Dist: homeassistant==<version>`). When none exists, read the
   package's README or changelog for a successor before concluding the release
   is missing.
+- Diff the `Requires-Dist` of the old and new test package. A pytest plugin
+  the old package pulled in (`pytest-timeout`, `pytest-cov`,
+  `pytest-unordered`) may be gone from the new one, and a test that uses its
+  marker then fails or warns with `PytestUnknownMarkWarning`.
+- For an intermediate step of a chain, pin the test package release that
+  pins that step's `.0` tag, not its latest patch, so the gate runs the code
+  the tag diff describes.
 - PyPI's JSON API can lag the simple index. Check
   `https://pypi.org/simple/<package>/` (or `uv pip install --dry-run`) before
   deciding a release is not out.
 - A new core release can raise its minimum Python. Read `requires-python` of
   the target release.
+- Core's non-English translations are built into the wheel and are not in
+  git. Read them from the venv, such as
+  `homeassistant/components/homeassistant/translations/pl.json` under its
+  `site-packages`.
+
+## Frontend
+
+An integration that ships a card or a panel depends on the frontend as much
+as on core, and core pins one frontend build per release in
+`homeassistant/components/frontend/manifest.json`
+(`home-assistant-frontend==20261028.4` at 2026.11.0).
+`scripts/frontend-releases.sh --from "$FROM" --to "$TO"` reads both pins from
+the cache and prints the notes of every frontend release in between, one
+line per note, prefixed with the release tag.
+
+- The notes run to hundreds of lines per cycle, and frontend PRs seldom carry
+  a label worth searching. Grep them for what the card touches: `custom card`,
+  `custom element`, `extra module`, `polyfill`, the frontend helpers the card
+  imports, and the names of the internal elements it reuses.
+- In 2026.11, "Load custom modules after the scoped registry polyfill" let a
+  card define its elements when its module loads, and a workaround that
+  waited for `home-assistant` became dead code. No core source shows it.
+- Read a PR it names with `gh pr view <number> --repo home-assistant/frontend`.
 
 ## Changes with no post
 
