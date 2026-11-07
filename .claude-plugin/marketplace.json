@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "claude-skills",
-  "version": "2.1.0",
-  "description": "Personal Claude Code plugins: Azure DevOps, Go, Swift (concurrency + modern features), house style, GitHub MCP, and transcript timestamps.",
+  "version": "2.2.0",
+  "description": "Personal Claude Code plugins: Azure DevOps, Go, Swift (concurrency + modern features), house style, GitHub MCP, transcript timestamps, and Home Assistant integration upgrades.",
   "owner": {
     "name": "Przemyslaw Szypowicz"
   },
@@ -55,6 +55,13 @@
       "description": "Show when each prompt, reply block, and tool call in the transcript was produced, as a dim time at the right edge of the row.",
       "version": "0.2.0",
       "tags": ["transcript", "timestamps", "ui", "mod", "hooks"]
+    },
+    {
+      "name": "ha-integration-upgrade",
+      "source": "./plugins/ha-integration-upgrade",
+      "description": "Move a Home Assistant custom integration to the next core release, one minor at a time, and use each release to adopt new core helpers and simplify the code.",
+      "version": "0.1.0",
+      "tags": ["home-assistant", "custom-integration", "upgrade", "deprecations", "python"]
     }
   ]
 }
