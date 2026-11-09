@@ -9,8 +9,8 @@ description: >-
   "approve a pipeline", "manage variable groups", "delete a branch",
   "comment on a PR", "review PR comments", "comment on work items",
   "resolve PR thread", "code suggestion", or mentions Azure DevOps, ADO, or
-  az devops CLI. Uses az CLI with PAT auth from the environment or a sequester
-  profile, falling back to az login tokens.
+  az devops CLI. Uses az CLI with PAT auth from the environment, falling back
+  to az login tokens.
 ---
 
 # Azure DevOps Operations
@@ -21,13 +21,12 @@ Use `az` CLI commands for most operations and bash scripts for complex multi-ste
 
 Credentials come from environment variables exported in the terminal **before** the session starts; they are inherited read-only. This skill only reads them - it never exports or mutates session credentials. The expected shape is the plain triple `ADO_ORG`, `ADO_PROJECT`, `AZURE_DEVOPS_EXT_PAT` - commands use these directly.
 
-When nothing is exported, two more sources can stand in: a [sequester](https://github.com/pszypowicz/sequester) secrets profile read per command block (see "Sequester profiles" below), or an `az login` session (see "az CLI token fallback" below).
+When nothing is exported, an `az login` session can stand in (see "az CLI token fallback" below).
 
 Check what is available:
 
 ```bash
 echo "ORG=${ADO_ORG:-MISSING} PROJECT=${ADO_PROJECT:-MISSING} PAT=${AZURE_DEVOPS_EXT_PAT:+set} TOKEN=${ADO_TOKEN:+set}"
-command -v sequester >/dev/null && sequester secret list   # sequester profiles (names only, no prompt)
 az account show --query '[user.name, tenantId]' -o tsv 2>/dev/null || echo "az: not logged in"
 # Entra tenant behind the org (anonymous request, no credentials needed)
 curl -sS -o /dev/null -D - "$ADO_ORG/_apis/connectionData" | tr -d '\r' \
@@ -35,25 +34,6 @@ curl -sS -o /dev/null -D - "$ADO_ORG/_apis/connectionData" | tr -d '\r' \
 ```
 
 When the two tenants differ, plain `az devops` commands fail under the az login fallback, so run them through `ado-exec.sh` (see "az CLI token fallback" below).
-
-### Sequester profiles (nothing exported)
-
-When no credential env vars are inherited and the `sequester` CLI is on PATH, read the PAT from a sequester secrets profile per command block. The convention is one profile per org, named as the org URL segment (the `<org>` in `https://dev.azure.com/<org>`), holding a single `AZURE_DEVOPS_EXT_PAT` - PATs are org-scoped, so the org identifies both the profile and the token. `sequester secret list` prints profile names and their variable names without prompting.
-
-`ADO_ORG` and `ADO_PROJECT` are not secrets. Derive them from the clone path (`.../dev.azure.com/<org>/<project>/...`) or the repo remote, and set them inside the wrapped block - the profile supplies only the PAT:
-
-```bash
-sequester env exec <org> -- bash -c '
-  export ADO_ORG=https://dev.azure.com/<org> ADO_PROJECT=<project>
-  az repos pr list -r <repo> --org "$ADO_ORG" -p "$ADO_PROJECT" --detect false
-'
-```
-
-Single-quote the block so the PAT never touches the calling shell. Each `env exec` is one profile read and may require a Touch ID tap from the user, so batch every command that needs credentials into one block per exec rather than wrapping commands individually. The bundled scripts read the same variables and run the same way, with the export line before the script call.
-
-The `az` commands in that block can still run as a signed-in `az login` account instead of the PAT, because the `az devops` extension tries those accounts first. To rule that out, run the block through `ado-exec.sh` inside the exec: `sequester env exec <org> -- ${CLAUDE_SKILL_DIR}/scripts/ado-exec.sh --org https://dev.azure.com/<org> -- bash -c '...'` (see "az CLI token fallback" below).
-
-Multi-org falls out of the naming: each org is its own profile, one block binds one org, and a cross-org task (for example a migration) reads in one exec and writes in another. A profile holding the full `ADO_ORG` / `ADO_PROJECT` / `AZURE_DEVOPS_EXT_PAT` triple also works - the exec injects all three and the export line is unnecessary.
 
 ### az CLI token fallback (no PAT exported)
 
@@ -65,7 +45,7 @@ Once org and project are known, auth resolves in this order (mirrors `scripts/li
 
 Under the az login fallback, run each command block through `ado-exec.sh`. It mints the token and exports it to the wrapped command only, as `ADO_TOKEN`, as `AZURE_DEVOPS_EXT_PAT` for the `az devops`, `az repos`, `az pipelines`, `az boards` and `az artifacts` commands, and as `ADO_AUTH_HEADER` for curl. With a PAT exported, the wrapper uses the PAT as it is. The wrapper writes no credential to disk, and the calling shell never sees the token.
 
-The `az devops` extension tries cached `az login` accounts before the exported credential, so with several accounts signed in to `az`, an `az` command could run as a different identity than curl. The wrapper prevents this by running the command with `AZURE_CONFIG_DIR` set to an empty temporary directory, which it removes afterwards. The `az` commands in the block then find no `az login` account and run as the exported credential. Azure resource commands such as `az account` need your login, so pass `--shared-az-config` for a block that runs them. The `az devops` commands in that block can then pick another signed-in account again (see `reference.md`). Batch the commands into one block per run, as with a sequester exec:
+The `az devops` extension tries cached `az login` accounts before the exported credential, so with several accounts signed in to `az`, an `az` command could run as a different identity than curl. The wrapper prevents this by running the command with `AZURE_CONFIG_DIR` set to an empty temporary directory, which it removes afterwards. The `az` commands in the block then find no `az login` account and run as the exported credential. Azure resource commands such as `az account` need your login, so pass `--shared-az-config` for a block that runs them. The `az devops` commands in that block can then pick another signed-in account again (see `reference.md`). Batch the commands into one block per run:
 
 ```bash
 ${CLAUDE_SKILL_DIR}/scripts/ado-exec.sh -- bash -c '
@@ -73,6 +53,8 @@ ${CLAUDE_SKILL_DIR}/scripts/ado-exec.sh -- bash -c '
   curl -sS -H "$ADO_AUTH_HEADER" "$ADO_ORG/_apis/connectionData"
 '
 ```
+
+A block binds one org. For a task that spans orgs, such as a migration, run one block per org and pass `--org https://dev.azure.com/<org>` to each, so every block mints a token for its own org's tenant.
 
 The wrapper exists because the `az devops` extension asks `az login` for tokens only in the tenants of your cached subscriptions. When the org sits in another tenant, every `az devops` call fails with "has not been materialized" (see Troubleshooting). The wrapper reads the org's tenant from the `X-VSS-ResourceTenant` header of an anonymous request to `$ADO_ORG/_apis/connectionData` and runs `az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --tenant <org tenant>`. The GUID is the public Azure DevOps resource, the same in every tenant. If your account is a member or guest of the org's tenant, this works from your existing `az login` without a prompt. Set `ADO_TENANT_ID` to skip the lookup. The bundled scripts do the same on their own.
 
@@ -84,7 +66,7 @@ If `ADO_ORG` or `ADO_PROJECT` is missing, derive them from the repo remote when 
 
 ### REST auth header
 
-Set `AUTH` once from whichever source is available - the curl snippets in this skill pass `-H "$AUTH"` and work with either form. Under a sequester profile or `ado-exec.sh`, build `AUTH` inside the wrapped block - the variables only exist there:
+Set `AUTH` once from whichever source is available - the curl snippets in this skill pass `-H "$AUTH"` and work with either form. Under `ado-exec.sh`, build `AUTH` inside the wrapped block - the variables only exist there:
 
 ```bash
 if [[ -n "${ADO_AUTH_HEADER:-}" ]]; then
@@ -96,9 +78,9 @@ else
 fi
 ```
 
-Stop and instruct the user only when no auth source works (no PAT in either shape, no sequester profile holding the triple, no `ADO_TOKEN`, and `az account show` fails):
+Stop and instruct the user only when no auth source works (no PAT, no `ADO_TOKEN`, and `az account show` fails):
 
-> Either run `az login` in your terminal, create a sequester profile named after your org (`sequester secret set <org> AZURE_DEVOPS_EXT_PAT`), or set the following (outside Claude Code) and start a new session:
+> Either run `az login` in your terminal, or set the following (outside Claude Code) and start a new session:
 >
 > ```
 > export ADO_ORG=https://dev.azure.com/<org>
@@ -704,7 +686,7 @@ Check CLAUDE.md for project-specific ADO configuration (custom work item types, 
 
 When the user asks for an ADO operation:
 
-1. Resolve auth per the Authentication section (PAT, sequester profile, `ADO_TOKEN`, or az login token through `ado-exec.sh`); instruct the user only if no source works
+1. Resolve auth per the Authentication section (PAT, `ADO_TOKEN`, or az login token through `ado-exec.sh`); instruct the user only if no source works
 2. Use `az` CLI with `-o json` when parsing programmatically, `-o table` for display
 3. For complex queries, chain commands (e.g., list pipelines -> find ID -> run pipeline)
 4. Use scripts from `${CLAUDE_SKILL_DIR}/scripts/` for: create-policy, get-run, get-logs, pr-threads, and exec (az login token for a command block)

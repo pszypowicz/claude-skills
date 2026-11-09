@@ -42,7 +42,7 @@ ado_require_env() {
   [[ -n "${ADO_ORG:-}" ]] || missing="ADO_ORG"
   [[ -n "${ADO_PROJECT:-}" ]] || missing="${missing:+$missing }ADO_PROJECT"
   if [[ -n "$missing" ]]; then
-    log_error "Missing: ${missing}. Export ADO_ORG (e.g. https://dev.azure.com/myorg) and ADO_PROJECT, or wrap the command in: sequester env exec <org> -- bash -c 'export ADO_ORG=... ADO_PROJECT=...; <command>'"
+    log_error "Missing: ${missing}. Export ADO_ORG (e.g. https://dev.azure.com/myorg) and ADO_PROJECT before running the script."
     return 1
   fi
   ado_require_org
@@ -145,7 +145,7 @@ _ado_explain_mint_failure() {
       log_error "That login can switch your default subscription. Restore it afterwards with: az account set --subscription <your subscription>"
       ;;
     *"az login"*)
-      log_error "The az CLI is not logged in. Run 'az login', set AZURE_DEVOPS_EXT_PAT, or use a sequester profile."
+      log_error "The az CLI is not logged in. Run 'az login' or set AZURE_DEVOPS_EXT_PAT."
       ;;
     *)
       log_error "az account get-access-token failed."
@@ -158,7 +158,7 @@ _ado_explain_mint_failure() {
 # tenant that backs ADO_ORG, and make it the active credential.
 _ado_mint() {
   if ! command -v az >/dev/null 2>&1; then
-    log_error "No credentials: AZURE_DEVOPS_EXT_PAT and ADO_TOKEN are unset and the az CLI is not installed. Set a PAT, use a sequester profile, or install az and run 'az login'."
+    log_error "No credentials: AZURE_DEVOPS_EXT_PAT and ADO_TOKEN are unset and the az CLI is not installed. Set a PAT, or install az and run 'az login'."
     return 1
   fi
   ado_discover_tenant || return 1
