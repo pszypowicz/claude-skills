@@ -127,25 +127,50 @@ _ado_az() {
   fi
 }
 
+# Succeed when the user reaches this machine over SSH. There the browser that
+# az login opens appears on this machine's screen, out of the user's reach.
+# Inside tmux the session environment decides, because tmux refreshes
+# SSH_CONNECTION there on every attach, while a long-lived pane keeps the
+# value from the attach it started under.
+ado_over_ssh() {
+  if [[ -n "${TMUX:-}" ]] && command -v tmux >/dev/null 2>&1; then
+    [[ "$(tmux show-environment SSH_CONNECTION 2>/dev/null)" == SSH_CONNECTION=* ]]
+    return
+  fi
+  [[ -n "${SSH_CONNECTION:-}" ]]
+}
+
+# The az login command to suggest: the device code flow over SSH, so the
+# user can sign in from a browser on their own machine, and the browser flow
+# otherwise.
+_ado_login_cmd() {
+  if ado_over_ssh; then
+    printf 'az login --use-device-code'
+  else
+    printf 'az login'
+  fi
+}
+
 _ado_explain_mint_failure() {
-  local out="$1" tenant_flag="" home=""
+  local out="$1" tenant_flag="" home="" login
   if [[ -n "$_ADO_TENANT_ID" ]]; then
     tenant_flag="--tenant ${_ADO_TENANT_ID} "
   fi
+  login=$(_ado_login_cmd)
   case "$out" in
     *AADSTS700082*)
       home=$(_ado_az account show --query tenantId -o tsv 2>/dev/null) || home=""
-      log_error "The az login session expired after going unused (AADSTS700082). Sign in again with: az login --tenant ${home:-<your subscription tenant>}"
+      log_error "The az login session expired after going unused (AADSTS700082). Sign in again with: ${login} --tenant ${home:-<your subscription tenant>}"
       ;;
     *AADSTS50020*|*AADSTS90072*)
       log_error "Your az account is not a member or guest of tenant ${_ADO_TENANT_ID:-<unknown>}, which backs ${ADO_ORG}. Ask an org admin for access, or use a PAT."
       ;;
     *AADSTS50076*|*AADSTS50079*|*AADSTS50158*|*AADSTS65001*|*interaction_required*)
-      log_error "The tenant behind ${ADO_ORG} requires an interactive sign-in. Run: az login ${tenant_flag}--allow-no-subscriptions --scope ${ADO_RESOURCE_ID}/.default"
+      log_error "The tenant behind ${ADO_ORG} requires an interactive sign-in. Run: ${login} ${tenant_flag}--allow-no-subscriptions --scope ${ADO_RESOURCE_ID}/.default"
       log_error "That login can switch your default subscription. Restore it afterwards with: az account set --subscription <your subscription>"
       ;;
     *"az login"*)
-      log_error "The az CLI is not logged in. Run 'az login' or set AZURE_DEVOPS_EXT_PAT."
+      log_error "The az CLI is not logged in. Run '${login}' or set AZURE_DEVOPS_EXT_PAT."
       ;;
     *)
       log_error "az account get-access-token failed."
@@ -158,7 +183,7 @@ _ado_explain_mint_failure() {
 # tenant that backs ADO_ORG, and make it the active credential.
 _ado_mint() {
   if ! command -v az >/dev/null 2>&1; then
-    log_error "No credentials: AZURE_DEVOPS_EXT_PAT and ADO_TOKEN are unset and the az CLI is not installed. Set a PAT, or install az and run 'az login'."
+    log_error "No credentials: AZURE_DEVOPS_EXT_PAT and ADO_TOKEN are unset and the az CLI is not installed. Set a PAT, or install az and run '$(_ado_login_cmd)'."
     return 1
   fi
   ado_discover_tenant || return 1
