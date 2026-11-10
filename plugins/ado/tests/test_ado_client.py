@@ -367,6 +367,62 @@ class MintErrors(Fixture):
         self.assertEqual(self.api_calls(), [])
 
 
+SSH_CONNECTION = "192.0.2.1 50000 192.0.2.2 22"
+TMUX = "/tmp/tmux-test/default,1,0"
+
+
+class SshSignIn(Fixture):
+    """Login hints use the device code flow when the user is on SSH."""
+
+    def setUp(self):
+        super().setUp()
+        self.org_tenant()
+        self.api(ok())
+
+    def not_logged_in(self):
+        self.mint_fails("ERROR: Please run 'az login' to setup account.\n")
+
+    def fake_tmux(self, session_value):
+        """Install a tmux whose show-environment prints session_value."""
+        path = os.path.join(self.bin, "tmux")
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\nprintf '%%s\\n' %s\n" % shlex.quote(session_value))
+        os.chmod(path, 0o755)
+
+    def test_ssh_session_suggests_device_code(self):
+        self.not_logged_in()
+        result = self.lib(API, SSH_CONNECTION=SSH_CONNECTION)
+        self.assertFailed(result)
+        self.assertIn("'az login --use-device-code'", result.stderr)
+
+    def test_local_session_suggests_browser_login(self):
+        self.not_logged_in()
+        result = self.lib(API)
+        self.assertFailed(result)
+        self.assertIn("'az login'", result.stderr)
+        self.assertNotIn("--use-device-code", result.stderr)
+
+    def test_tmux_attached_over_ssh_suggests_device_code(self):
+        self.not_logged_in()
+        self.fake_tmux("SSH_CONNECTION=" + SSH_CONNECTION)
+        result = self.lib(API, TMUX=TMUX)
+        self.assertIn("'az login --use-device-code'", result.stderr)
+
+    def test_tmux_attached_locally_overrides_pane_ssh_variable(self):
+        self.not_logged_in()
+        self.fake_tmux("-SSH_CONNECTION")
+        result = self.lib(API, TMUX=TMUX, SSH_CONNECTION=SSH_CONNECTION)
+        self.assertIn("'az login'", result.stderr)
+        self.assertNotIn("--use-device-code", result.stderr)
+
+    def test_interaction_required_over_ssh_suggests_device_code_scoped_login(self):
+        self.mint_fails("ERROR: AADSTS50076: you must use multi-factor authentication.\n")
+        result = self.lib(API, SSH_CONNECTION=SSH_CONNECTION)
+        self.assertFailed(result)
+        self.assertIn("az login --use-device-code --tenant %s --allow-no-subscriptions --scope %s/.default"
+                      % (ORG_TENANT, RESOURCE), result.stderr)
+
+
 class Responses(Fixture):
     def test_rejected_minted_token_is_reminted_once(self):
         first, second = jwt(ORG_TENANT, "first"), jwt(ORG_TENANT, "second")
@@ -857,6 +913,6 @@ def _major(shell):
 
 
 for _shell in _shells():
-    for _group in (AuthResolution, MintErrors, Responses, Scripts, LargeResponses, Exec, ExecAzConfig):
+    for _group in (AuthResolution, MintErrors, SshSignIn, Responses, Scripts, LargeResponses, Exec, ExecAzConfig):
         _name = "%sBash%s" % (_group.__name__, _major(_shell))
         globals()[_name] = type(_name, (_group, unittest.TestCase), {"SHELL": _shell})

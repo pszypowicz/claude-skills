@@ -493,7 +493,7 @@ The minted token works as a Bearer token for curl and as `AZURE_DEVOPS_EXT_PAT` 
 
 - `_set_subscriptions` merges the new tenant into the cached subscription list, so your existing subscriptions stay.
 - The default subscription moves to the new login's results unless your previous default is among them. An org tenant that holds none of your subscriptions adds only a tenant-level account (`N/A(tenant level account)`), and that account becomes the default. Every ARM command without `--subscription` then runs against a tenant with no subscription until you run `az account set`. The interactive subscription picker lists only the new tenant's entries.
-- It needs an interactive browser sign-in, and the extra tenant stays in the profile until `az logout`. With two tenants cached, the extension checks each tenant's token on every call.
+- It needs an interactive sign-in, in the browser or, over SSH, with `--use-device-code`, and the extra tenant stays in the profile until `az logout`. With two tenants cached, the extension checks each tenant's token on every call.
 
 The header lookup with `--tenant` changes no `az` state and needs no extra sign-in. The login is still the fix when the org's tenant demands an interactive sign-in. Use the Azure DevOps scope, so the sign-in satisfies the policies for that resource, then restore your default subscription:
 
@@ -511,7 +511,7 @@ az account set --subscription <your subscription>
 | `AADSTS50020`, `AADSTS90072`                                                       | Your account is not a member or guest of the org's tenant                 | Ask an org admin for access, or use a PAT          |
 | `AADSTS50076`, `AADSTS50079`, `AADSTS50158`, `AADSTS65001`, `interaction_required` | The org's tenant requires an interactive sign-in                          | The scoped `az login` above, then `az account set` |
 
-Signing in to the tenant of your subscriptions finds the same subscriptions again, so your default subscription stays available. The scripts print the matching fix, followed by the `az` output.
+Signing in to the tenant of your subscriptions finds the same subscriptions again, so your default subscription stays available. The scripts print the matching fix, followed by the `az` output. Over SSH, each `az login` fix takes `--use-device-code`, and the scripts print it in that form (see "Signing in over SSH" in SKILL.md).
 
 ### Response handling in the bundled scripts
 
