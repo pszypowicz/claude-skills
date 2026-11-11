@@ -3,12 +3,16 @@
 The tests put small wrappers named curl and az on PATH that run this file.
 Each invocation is appended to calls.jsonl in FAKE_DIR, and the response
 comes from scenario.json in the same directory. A route's responses are
-served in order; the last one repeats once the list runs out.
+served in order; the last one repeats once the list runs out. An az response
+can carry "sleep": its stderr is written first, then the fake waits that many
+seconds before its stdout and exit, like a login that waits for the user.
 """
 
+import fcntl
 import json
 import os
 import sys
+import time
 
 # curl options that take a value. Anything else starting with "-" is a flag.
 CURL_VALUE_OPTS = {
@@ -34,16 +38,22 @@ def record(call):
 
 
 def next_response(key, responses):
-    """Return the next response for a route, advancing its counter."""
+    """Return the next response for a route, advancing its counter.
+
+    The counter update holds an exclusive lock, so concurrent fakes, such as
+    two sessions polling at once, each get their own response.
+    """
     path = os.path.join(fake_dir(), "state.json")
-    state = {}
-    if os.path.exists(path):
-        with open(path) as f:
-            state = json.load(f)
-    count = state.get(key, 0)
-    state[key] = count + 1
-    with open(path, "w") as f:
-        json.dump(state, f)
+    with open(path + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = {}
+        if os.path.exists(path):
+            with open(path) as f:
+                state = json.load(f)
+        count = state.get(key, 0)
+        state[key] = count + 1
+        with open(path, "w") as f:
+            json.dump(state, f)
     return responses[min(count, len(responses) - 1)]
 
 
@@ -182,8 +192,10 @@ def az(argv):
         match = route["match"]
         if argv[:len(match)] == match:
             resp = next_response("az-%d" % index, route["responses"])
-            sys.stdout.write(resp.get("stdout", ""))
             sys.stderr.write(resp.get("stderr", ""))
+            sys.stderr.flush()
+            time.sleep(resp.get("sleep", 0))
+            sys.stdout.write(resp.get("stdout", ""))
             return resp.get("exit", 0)
     sys.stderr.write("fake az: no route for %s\n" % " ".join(argv))
     return 2

@@ -64,23 +64,21 @@ Keep `az login --tenant <org tenant> --allow-no-subscriptions` for orgs whose te
 
 If `ADO_ORG` or `ADO_PROJECT` is missing, derive them from the repo remote when possible (`git remote get-url origin`; HTTPS remotes look like `https://dev.azure.com/<org>/<project>/_git/<repo>`, SSH like `git@ssh.dev.azure.com:v3/<org>/<project>/<repo>`) and set them for the commands you run.
 
-### Signing in over SSH
+### Signing in
 
-When the user reaches this machine over SSH, the browser that `az login` opens appears on this machine's screen, out of their reach. Check before you suggest or start a sign-in:
-
-```bash
-bash -c 'source "$1" && ado_over_ssh' _ "${CLAUDE_SKILL_DIR}/scripts/lib/ado-client.sh" && echo "over SSH"
-```
-
-Inside tmux the check reads the session environment, which tmux refreshes on every attach, so it reflects how the user is connected now and not how the pane was first opened.
-
-Over SSH, start the device code flow yourself instead of asking the user to run a command. Run it in the background, because it waits until the sign-in finishes:
+When minting fails because no `az login` session covers the org's tenant, sign the user in with `ado-login.sh` instead of asking them to run `az login`. Run it in the background, because it waits until the sign-in finishes:
 
 ```bash
-az login --use-device-code --tenant <tenant> --allow-no-subscriptions
+${CLAUDE_SKILL_DIR}/scripts/ado-login.sh --org "$ADO_ORG"
 ```
 
-Pass `--allow-no-subscriptions` for a tenant that holds none of the user's subscriptions, such as an org tenant, and drop it otherwise. Read the address and code from the command's output, give both to the user, who signs in from a browser on their own machine, and continue when the command exits. That login can switch the default subscription, so restore it afterwards with `az account set --subscription <subscription>`. If the tenant blocks the device code flow, fall back to the browser flow and ask the user to run `az login` at this machine's own screen. The bundled scripts' error messages suggest `az login --use-device-code` over SSH as well.
+The script signs in to the Entra tenant behind the org with `az login --allow-no-subscriptions --scope <Azure DevOps>/.default`. Over SSH it uses the device code flow, because the browser that `az login` opens would appear on this machine's screen, out of the user's reach. Inside tmux it decides from the session environment, which tmux refreshes on every attach. `--device-code` and `--browser` override the choice. When the login moves the default subscription, the script restores the previous one.
+
+Read the first lines of its output and pass them on to the user: the address and code for the device code flow, or the note that a browser window opened. Continue when the script exits 0, which happens as soon as a token for the org can be minted.
+
+Sessions on the same machine share one sign-in per tenant. When another session already runs the login, the script prints that session's code with the line "another session is already signing in" and starts no login of its own. Give the user that same code. Every session exits 0 once the user completes any sign-in for the tenant, so all waiting sessions continue together.
+
+Exit 1 means the sign-in failed or timed out after 15 minutes (`--timeout`). If the tenant blocks the device code flow, ask the user to run `az login` at this machine's own screen. The bundled scripts' error messages suggest `az login --use-device-code` over SSH as well.
 
 ### REST auth header
 
@@ -96,7 +94,7 @@ else
 fi
 ```
 
-Stop and instruct the user only when no auth source works (no PAT, no `ADO_TOKEN`, and `az account show` fails). Over SSH, start the device code flow first, as "Signing in over SSH" describes, and fall back to this message when that is not possible:
+Stop and instruct the user only when no auth source works (no PAT, no `ADO_TOKEN`, and `az account show` fails). Try `ado-login.sh` first, as "Signing in" describes, and fall back to this message when that is not possible:
 
 > Either run `az login` in your terminal, or set the following (outside Claude Code) and start a new session:
 >
@@ -707,7 +705,7 @@ When the user asks for an ADO operation:
 1. Resolve auth per the Authentication section (PAT, `ADO_TOKEN`, or az login token through `ado-exec.sh`); instruct the user only if no source works
 2. Use `az` CLI with `-o json` when parsing programmatically, `-o table` for display
 3. For complex queries, chain commands (e.g., list pipelines -> find ID -> run pipeline)
-4. Use scripts from `${CLAUDE_SKILL_DIR}/scripts/` for: create-policy, get-run, get-logs, pr-threads, and exec (az login token for a command block)
+4. Use scripts from `${CLAUDE_SKILL_DIR}/scripts/` for: create-policy, get-run, get-logs, pr-threads, exec (az login token for a command block), and login (one shared `az login` per tenant)
 5. For environments/checks/approvals and comments, use REST curl patterns
 6. For work items, remember: `az boards work-item show/update/relation add` are org-scoped (no `--project`), only `create` and `query` take `--project`
 7. When creating tasks from stories, inherit custom fields, area-path, and iteration-path from the parent
