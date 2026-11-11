@@ -423,6 +423,171 @@ class SshSignIn(Fixture):
                       % (ORG_TENANT, RESOURCE), result.stderr)
 
 
+DEVICE_CODE_MESSAGE = ("To sign in, use a web browser to open the page https://microsoft.com/devicelogin "
+                       "and enter the code TESTCODE1 to authenticate.\n")
+NOT_LOGGED_IN = {"stderr": "ERROR: Please run 'az login' to setup account.\n", "exit": 1}
+
+
+class Login(Fixture):
+    """ado-login.sh shares one sign-in per tenant across sessions."""
+
+    def setUp(self):
+        super().setUp()
+        self.lock = os.path.join(self.env["HOME"], ".azure", "ado-login", ORG_TENANT)
+
+    def login(self, *args, **env):
+        return self.script("ado-login.sh", "--tenant", ORG_TENANT, "--interval", "0", "--timeout", "10",
+                           *args, **env)
+
+    def tokens(self, *ready):
+        """Answer the token checks in order, True with a token and False as not logged in."""
+        self.route_az(["account", "get-access-token"],
+                      *[{"stdout": jwt(ORG_TENANT) + "\n"} if r else NOT_LOGGED_IN for r in ready])
+
+    def az_login(self, **resp):
+        self.route_az(["login"], dict({"stderr": DEVICE_CODE_MESSAGE}, **resp))
+
+    def logins(self):
+        return [c["argv"] for c in self.calls("az") if c["argv"][:1] == ["login"]]
+
+    def hold_lock(self, pid, message=DEVICE_CODE_MESSAGE):
+        os.makedirs(self.lock)
+        with open(os.path.join(self.lock, "pid"), "w") as f:
+            f.write("%d\n" % pid)
+        with open(os.path.join(self.lock, "message"), "w") as f:
+            f.write(message)
+
+    def dead_pid(self):
+        proc = subprocess.Popen(["true"])
+        proc.wait()
+        return proc.pid
+
+    def test_help_exits_zero(self):
+        self.assertOk(self.script("ado-login.sh", "--help"))
+
+    def test_needs_an_org_or_a_tenant(self):
+        self.assertEqual(self.script("ado-login.sh", ADO_ORG=None).returncode, 2)
+
+    def test_rejects_a_tenant_that_is_not_a_guid(self):
+        self.assertEqual(self.script("ado-login.sh", "--tenant", "not-a-guid").returncode, 2)
+
+    def test_org_lookup_names_the_tenant(self):
+        self.org_tenant()
+        self.tokens(True)
+        result = self.script("ado-login.sh", "--org", ORG)
+        self.assertOk(result)
+        self.assertIn(ORG_TENANT, result.stdout)
+
+    def test_already_signed_in_starts_no_login(self):
+        self.tokens(True)
+        result = self.login()
+        self.assertOk(result)
+        self.assertIn("already signed in", result.stdout)
+        self.assertEqual(self.logins(), [])
+
+    def test_over_ssh_runs_a_scoped_device_code_login_and_prints_the_code(self):
+        self.tokens(False, False, True)
+        self.az_login()
+        result = self.login(SSH_CONNECTION=SSH_CONNECTION)
+        self.assertOk(result)
+        self.assertIn("TESTCODE1", result.stdout)
+        self.assertIn("signed in to tenant " + ORG_TENANT, result.stdout)
+        argv = self.logins()[0]
+        for part in ("--use-device-code", "--allow-no-subscriptions", "--tenant", ORG_TENANT,
+                     "--scope", RESOURCE + "/.default"):
+            self.assertIn(part, argv)
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_local_session_uses_the_browser_login(self):
+        self.tokens(False, False, True)
+        self.az_login(stderr="A web browser has been opened at https://login.example.invalid.\n")
+        result = self.login()
+        self.assertOk(result)
+        self.assertNotIn("--use-device-code", self.logins()[0])
+
+    def test_device_code_flag_applies_outside_ssh(self):
+        self.tokens(False, False, True)
+        self.az_login()
+        self.assertOk(self.login("--device-code"))
+        self.assertIn("--use-device-code", self.logins()[0])
+
+    def test_waiting_session_shows_the_running_login_and_starts_none(self):
+        self.hold_lock(os.getpid())
+        self.tokens(False, False, True)
+        result = self.login()
+        self.assertOk(result)
+        self.assertIn("another session is already signing in", result.stdout)
+        self.assertIn("TESTCODE1", result.stdout)
+        self.assertEqual(self.logins(), [])
+        self.assertTrue(os.path.isdir(self.lock))
+
+    def test_stale_lock_is_taken_over(self):
+        self.hold_lock(self.dead_pid(), "an old sign-in message\n")
+        self.tokens(False, False, False, True)
+        self.az_login()
+        result = self.login(SSH_CONNECTION=SSH_CONNECTION)
+        self.assertOk(result)
+        self.assertEqual(len(self.logins()), 1)
+        self.assertNotIn("an old sign-in message", result.stdout)
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_failed_login_exits_1_and_releases_the_lock(self):
+        self.tokens(False)
+        self.az_login(stderr="ERROR: The device code expired.\n", exit=1)
+        result = self.login(SSH_CONNECTION=SSH_CONNECTION)
+        self.assertFailed(result)
+        self.assertIn("az login failed", result.stderr)
+        self.assertIn("device code expired", result.stderr)
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_another_login_unblocks_a_pending_owner(self):
+        self.tokens(False, False, False, True)
+        self.az_login(sleep=30)
+        start = time.time()
+        result = self.login(SSH_CONNECTION=SSH_CONNECTION)
+        self.assertOk(result)
+        self.assertLess(time.time() - start, 15)
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_timeout_exits_1_and_releases_the_lock(self):
+        self.tokens(False)
+        self.az_login(sleep=30)
+        result = self.login("--timeout", "1", "--interval", "0.2", SSH_CONNECTION=SSH_CONNECTION)
+        self.assertFailed(result)
+        self.assertIn("Timed out", result.stderr)
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_two_concurrent_sessions_share_one_login(self):
+        # The login stays pending, so only the shared token check can end both runs.
+        self.tokens(*([False] * 20 + [True]))
+        self.az_login(sleep=30)
+        with open(os.path.join(self.tmp, "scenario.json"), "w") as f:
+            json.dump(self.scenario, f)
+        env = dict(self.env, SSH_CONNECTION=SSH_CONNECTION)
+        cmd = [self.SHELL, os.path.join(SCRIPTS, "ado-login.sh"), "--tenant", ORG_TENANT,
+               "--interval", "0.2", "--timeout", "30"]
+        procs = [subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                 for _ in range(2)]
+        outs = [p.communicate(timeout=60) for p in procs]
+        for proc, (out, err) in zip(procs, outs):
+            self.assertEqual(proc.returncode, 0, "stdout=%r stderr=%r" % (out, err))
+            self.assertIn("TESTCODE1", out)
+        self.assertEqual(len(self.logins()), 1)
+        self.assertEqual(sum("another session is already signing in" in out for out, _ in outs), 1)
+        self.assertFalse(os.path.exists(self.lock))
+
+    def test_restores_the_default_subscription_the_login_moved(self):
+        self.tokens(False, False, True)
+        self.az_login()
+        self.route_az(["account", "show"], {"stdout": "sub-before\n"}, {"stdout": ORG_TENANT + "\n"})
+        self.route_az(["account", "set"], {"stdout": ""})
+        result = self.login()
+        self.assertOk(result)
+        sets = [c["argv"] for c in self.calls("az") if c["argv"][:2] == ["account", "set"]]
+        self.assertEqual(sets, [["account", "set", "--subscription", "sub-before"]])
+        self.assertIn("restored the default subscription sub-before", result.stdout)
+
+
 class Responses(Fixture):
     def test_rejected_minted_token_is_reminted_once(self):
         first, second = jwt(ORG_TENANT, "first"), jwt(ORG_TENANT, "second")
@@ -913,6 +1078,6 @@ def _major(shell):
 
 
 for _shell in _shells():
-    for _group in (AuthResolution, MintErrors, SshSignIn, Responses, Scripts, LargeResponses, Exec, ExecAzConfig):
+    for _group in (AuthResolution, MintErrors, SshSignIn, Login, Responses, Scripts, LargeResponses, Exec, ExecAzConfig):
         _name = "%sBash%s" % (_group.__name__, _major(_shell))
         globals()[_name] = type(_name, (_group, unittest.TestCase), {"SHELL": _shell})

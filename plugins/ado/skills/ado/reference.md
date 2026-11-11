@@ -511,7 +511,7 @@ az account set --subscription <your subscription>
 | `AADSTS50020`, `AADSTS90072`                                                       | Your account is not a member or guest of the org's tenant                 | Ask an org admin for access, or use a PAT          |
 | `AADSTS50076`, `AADSTS50079`, `AADSTS50158`, `AADSTS65001`, `interaction_required` | The org's tenant requires an interactive sign-in                          | The scoped `az login` above, then `az account set` |
 
-Signing in to the tenant of your subscriptions finds the same subscriptions again, so your default subscription stays available. The scripts print the matching fix, followed by the `az` output. Over SSH, each `az login` fix takes `--use-device-code`, and the scripts print it in that form (see "Signing in over SSH" in SKILL.md).
+Signing in to the tenant of your subscriptions finds the same subscriptions again, so your default subscription stays available. The scripts print the matching fix, followed by the `az` output. Over SSH, each `az login` fix takes `--use-device-code`, and the scripts print it in that form. `ado-login.sh` runs the scoped login for you and restores the default subscription (see "Signing in" in SKILL.md).
 
 ### Response handling in the bundled scripts
 
