@@ -74,7 +74,15 @@ ${CLAUDE_SKILL_DIR}/scripts/ado-login.sh --org "$ADO_ORG"
 
 The script signs in to the Entra tenant behind the org with `az login --allow-no-subscriptions --scope <Azure DevOps>/.default`. Over SSH it uses the device code flow, because the browser that `az login` opens would appear on this machine's screen, out of the user's reach. Inside tmux it decides from the session environment, which tmux refreshes on every attach. `--device-code` and `--browser` override the choice. When the login moves the default subscription, the script restores the previous one.
 
-Read the first lines of its output and pass them on to the user: the address and code for the device code flow, or the note that a browser window opened. Continue when the script exits 0, which happens as soon as a token for the org can be minted.
+Read the first lines of its output and pass them on to the user: the address and code for the device code flow, or the note that a browser window opened. Put the address and the code each at the end of its own line with no punctuation after it, so a double-click on the code or a click on the address does not pick up a trailing period:
+
+```text
+Sign in for tenant 11111111:
+https://login.microsoft.com/device
+Code: ABCD1234X
+```
+
+Continue when the script exits 0, which happens as soon as a token for the org can be minted.
 
 Sessions on the same machine share one sign-in per tenant. When another session already runs the login, the script prints that session's code with the line "another session is already signing in" and starts no login of its own. Give the user that same code. Every session exits 0 once the user completes any sign-in for the tenant, so all waiting sessions continue together.
 
