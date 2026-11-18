@@ -704,6 +704,35 @@ print(json.dumps({'displayName': u.get('providerDisplayName'), 'mail': mail, 'id
 
 Use the returned email for `--assigned-to` and the GUID for reviewer operations. Azure DevOps answers this call itself, so the result holds for every auth source, including a guest account in the org's tenant. Avoid `az ad signed-in-user show` for this, because it returns your Entra object id in your home tenant, and reviewer operations need the Azure DevOps identity id. Do **not** persist this to memory - the user may switch accounts between sessions.
 
+## Web links
+
+Write every ADO item you show the user as a markdown link to its web page, so the user can click it. This covers work items, pull requests, pipeline runs, pipelines, repositories, branches, tags, commits, files and environments, in lists and tables as well as in sentences. Keep the item's reference in the link text, which is `#1234` for a work item, `!567` for a pull request and the run id for a run. Put the title after the link as plain text:
+
+```markdown
+- [#1234](https://dev.azure.com/myorg/myproject/_workitems/edit/1234) Fix the login redirect
+- [!567](https://dev.azure.com/myorg/myproject/_git/my-repo/pullrequest/567) Add a retry to the deploy step
+- [Run 45100](https://dev.azure.com/myorg/myproject/_build/results?buildId=45100) failed in Deploy
+```
+
+`$ADO_ORG` is the org URL, such as `https://dev.azure.com/myorg`. Build the address from it:
+
+| Item         | Web address                                                         |
+| ------------ | ------------------------------------------------------------------- |
+| Work item    | `$ADO_ORG/$ADO_PROJECT/_workitems/edit/<id>`                        |
+| Pull request | `$ADO_ORG/$ADO_PROJECT/_git/<repo>/pullrequest/<id>`                |
+| Pipeline run | `$ADO_ORG/$ADO_PROJECT/_build/results?buildId=<runId>`              |
+| Pipeline     | `$ADO_ORG/$ADO_PROJECT/_build?definitionId=<pipelineId>`            |
+| Repository   | `$ADO_ORG/$ADO_PROJECT/_git/<repo>`                                 |
+| Branch       | `$ADO_ORG/$ADO_PROJECT/_git/<repo>?version=GB<branch>`              |
+| Tag          | `$ADO_ORG/$ADO_PROJECT/_git/<repo>?version=GT<tag>`                 |
+| Commit       | `$ADO_ORG/$ADO_PROJECT/_git/<repo>/commit/<sha>`                    |
+| File         | `$ADO_ORG/$ADO_PROJECT/_git/<repo>?path=/<path>&version=GB<branch>` |
+| Environment  | `$ADO_ORG/$ADO_PROJECT/_environments/<id>`                          |
+
+Use the project that owns the item. A query or a relation can return items from another project, and a work item names its project in `System.TeamProject`. Percent-encode spaces and other reserved characters in the project, repository, branch and path, for example `My Project` as `My%20Project`, because a raw space ends the markdown link early.
+
+The `url` field in `az` and REST responses is the REST API address and returns JSON, so do not use it as the link. The `webUrl` of a repository, in `az repos show` output and under `repository` in a pull request, is the repository's web address with the encoding already done, so `<webUrl>/pullrequest/<id>` is the pull request link. `ado-get-run.sh` prints the run's address on its `Web:` line.
+
 ## Instructions
 
 Check CLAUDE.md for project-specific ADO configuration (custom work item types, area paths, iteration paths, custom fields, team conventions).
@@ -722,6 +751,7 @@ When the user asks for an ADO operation:
 10. When reading a work item or PR for context, also load comments/threads for full picture
 11. For PR review, start by listing active threads to see what needs attention
 12. Code suggestions use ` ```suggestion ` blocks - ADO renders them as applicable diffs
+13. When you show the user a work item, pull request, run or other ADO item, write it as a link, as "Web links" describes
 
 ## Additional Resources
 
