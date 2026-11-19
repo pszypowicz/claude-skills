@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "unifi",
+  "description": "Read-only investigation of a local UniFi console. Devices, clients, sites, and firmware come from the Integration API, and firewall rules, routes, DHCP leases, logs, Protect streams, and packet capture come over SSH. Credentials are read from environment variables, with a macOS Keychain fallback for the API key.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Przemyslaw Szypowicz"
+  }
+}

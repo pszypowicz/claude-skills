@@ -1,0 +1,614 @@
+#!/usr/bin/env python3
+"""Run a fixed set of read-only diagnostics on a UniFi console over SSH.
+
+This is the fallback for questions the Integration API cannot answer: applied
+firewall state, kernel and service logs, live packet capture, and the on-disk
+configuration. Prefer `unifi` (the API client) for anything it can answer.
+
+Only the commands in CHECKS can run. That is a guardrail rather than a
+guarantee: the session is root on the console, so the restriction holds because
+this script refuses to build any other command line, not because the console
+enforces anything. Commands marked sensitive additionally require --confirm.
+"""
+
+import argparse
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+
+CONFIG_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "unifi"
+)
+CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+# The askpass helper lives in libexec/, off the PATH that bin/ is put on, so it
+# is not offered as a command of its own.
+PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+ASKPASS = os.path.join(PLUGIN_ROOT, "libexec", "unifi-askpass")
+
+MAX_TCPDUMP_PACKETS = 500
+
+# Each check is a fixed command. Entries use "argv" for a plain command, or
+# "shell" for a literal snippet where a single command will not do. Both forms
+# are constants in this file; nothing a caller supplies is ever interpolated
+# without passing through shlex.quote first.
+CHECKS = {
+    "device-info": {
+        "argv": ["ubnt-device-info", "summary"],
+        "desc": "Model, firmware, and serial of the console.",
+    },
+    "available": {
+        "shell": (
+            "for b in ubnt-device-info ip ss nft iptables-save conntrack "
+            "journalctl dmesg free df ps tcpdump mca-dump; do "
+            "printf '%-18s %s\\n' \"$b\" \"$(command -v \"$b\" || echo MISSING)\"; done"
+        ),
+        "desc": "Which check binaries this firmware actually ships. Run after an upgrade.",
+    },
+    "addr": {
+        "argv": ["ip", "-o", "addr", "show"],
+        "desc": "Addresses on every interface, one per line.",
+    },
+    "addr-brief": {
+        "argv": ["ip", "-br", "addr"],
+        "desc": "Compact interface and address summary.",
+    },
+    "routes": {
+        "argv": ["ip", "route", "show", "table", "all"],
+        "desc": "Every routing table, including policy routes.",
+    },
+    "rules": {
+        "argv": ["ip", "rule", "show"],
+        "desc": "Policy routing rules.",
+    },
+    "link-stats": {
+        "argv": ["ip", "-s", "link"],
+        "desc": "Per-interface packet and error counters.",
+    },
+    "neighbors": {
+        "argv": ["ip", "neigh", "show"],
+        "desc": "ARP and NDP neighbor table.",
+    },
+    "listening": {
+        "argv": ["ss", "-tulpn"],
+        "desc": "Listening TCP and UDP sockets with owning process.",
+    },
+    "nft": {
+        "argv": ["nft", "list", "ruleset"],
+        "desc": (
+            "Applied nftables ruleset. Absent on firmware that filters with "
+            "iptables instead; use the 'iptables' check there."
+        ),
+    },
+    "iptables": {
+        "argv": ["iptables-save"],
+        "desc": "Applied iptables rules, as the kernel actually has them.",
+    },
+    "conntrack-count": {
+        "argv": ["conntrack", "-C"],
+        "desc": "Number of tracked connections.",
+    },
+    "conntrack": {
+        "argv": ["conntrack", "-L"],
+        "desc": "Connection tracking table. Large on a busy network.",
+    },
+    "leases": {
+        "shell": (
+            "for f in /run/dnsmasq*.leases /var/lib/misc/dnsmasq*.leases "
+            "/data/udapi-config/dnsmasq.lease; do "
+            "[ -f \"$f\" ] && echo \"== $f\" && cat \"$f\"; done"
+        ),
+        "desc": "DHCP leases, from whichever path this firmware uses.",
+    },
+    "processes": {
+        "argv": ["ps", "aux"],
+        "desc": "Running processes.",
+    },
+    "uptime": {"argv": ["uptime"], "desc": "Load average and uptime."},
+    "cpuinfo": {
+        "shell": (
+            "echo \"cores: $(grep -c ^processor /proc/cpuinfo)\"; "
+            "grep -m1 -E 'model name|Hardware' /proc/cpuinfo; "
+            "echo \"loadavg: $(cat /proc/loadavg)\""
+        ),
+        "desc": "Core count and load average, for reading load figures correctly.",
+    },
+    "cpu-sample": {
+        "shell": (
+            "top -b -n 2 -d 3 2>/dev/null | awk '/^top -/{i++} i==2' | head -22"
+        ),
+        "desc": (
+            "Live CPU sample. Uses the second top iteration, because the first "
+            "reports averages since boot rather than current load."
+        ),
+    },
+    "io-pressure": {
+        "shell": (
+            "echo '== mdstat =='; head -12 /proc/mdstat 2>/dev/null; "
+            "echo '== pressure stall =='; for f in /proc/pressure/io /proc/pressure/cpu "
+            "/proc/pressure/memory; do [ -r \"$f\" ] && echo \"$f\" && cat \"$f\"; done; "
+            "echo '== vmstat (3s samples) =='; vmstat 3 3 2>/dev/null"
+        ),
+        "desc": (
+            "Disk array state, kernel pressure stall info, and vmstat. Use to tell "
+            "an I/O-bound console from a CPU-bound one."
+        ),
+    },
+    "cgroup-cpu": {
+        "shell": "systemd-cgtop -b -n 2 -d 3 --order=cpu 2>/dev/null | tail -20",
+        "desc": "CPU and memory per service cgroup. Shows which app owns the load.",
+    },
+    "top": {
+        "shell": "ps -eo pcpu,pmem,rss,comm --sort=-pcpu | head -15",
+        "desc": "Top processes by CPU, already sorted.",
+    },
+    "mem": {"argv": ["free", "-m"], "desc": "Memory use in MB."},
+    "disk": {"argv": ["df", "-h"], "desc": "Filesystem use."},
+    "journal": {
+        "lines_argv": lambda n: ["journalctl", "--no-pager", "-n", str(n)],
+        "desc": "Most recent systemd journal entries. Use --lines.",
+    },
+    "dmesg": {
+        "lines_shell": lambda n: f"dmesg --ctime | tail -n {n}",
+        "desc": "Most recent kernel ring buffer entries. Use --lines.",
+    },
+    "protect-recent-recordings": {
+        "shell": (
+            "echo '== ubvinfo binary =='; "
+            "for p in /usr/share/unifi-protect/app/node_modules/.bin/ubnt_ubvinfo "
+            "/usr/bin/ubnt_ubvinfo /usr/local/bin/ubnt_ubvinfo; do "
+            "[ -x \"$p\" ] && echo \"$p\"; done; "
+            "echo '== ubv files touched in the last 30 min =='; "
+            "find /srv/unifi-protect/video -name '*.ubv' -mmin -30 2>/dev/null | head -20; "
+            "echo '== newest per top-level dir =='; "
+            "ls /srv/unifi-protect/video 2>/dev/null | head"
+        ),
+        "desc": "Locate the ubvinfo tool and the recordings currently being written.",
+    },
+    "protect-status": {
+        "shell": "systemctl status unifi-protect --no-pager 2>&1 | head -20",
+        "desc": "Protect service state, uptime, and restart count.",
+    },
+    "protect-paths": {
+        "shell": (
+            "for p in /srv/unifi-protect /data/unifi-protect /persistent/unifi-protect "
+            "/etc/unifi-protect; do [ -e \"$p\" ] && echo \"== $p\" && "
+            "ls -la \"$p\" 2>/dev/null | head -25; done; "
+            "echo '== protect volume =='; df -h | grep -E 'volume|md[0-9]'"
+        ),
+        "desc": "Where Protect keeps configuration and recordings on this firmware.",
+    },
+    "protect-db": {
+        "shell": (
+            "echo '== jsonDb =='; ls -la /etc/unifi-protect/jsonDb 2>/dev/null; "
+            "echo '== restart-loop.state =='; cat /srv/unifi-protect/restart-loop.state 2>/dev/null; "
+            "echo '== json tooling =='; for t in jq python3 python; do "
+            "printf '%-8s %s\\n' \"$t\" \"$(command -v \"$t\" || echo MISSING)\"; done"
+        ),
+        "desc": "Protect config store layout and which JSON tools the console has.",
+    },
+    "protect-camera-config": {
+        "shell": (
+            "jq -S '.[] | {name, type, state, isThirdPartyCamera, isAdopted, "
+            "videoCodec, videoMode, recordingMode: .recordingSettings.mode, "
+            "smartDetect: .smartDetectSettings.objectTypes, "
+            "phyRate: .wiredConnectionState.phyRate, "
+            "channels: [.channels[]? | {id, name, enabled, isRtspEnabled, width, height, "
+            "fps, bitrate, minBitrate, maxBitrate, idrInterval, videoId, minClientAdaptiveBitRate}]}' "
+            "/etc/unifi-protect/jsonDb/cameras.json"
+        ),
+        "desc": (
+            "Per-camera Protect stream settings. Field-whitelisted, so camera "
+            "credentials stored alongside them are never read out."
+        ),
+    },
+    "protect-aiport-config": {
+        "shell": (
+            "jq -S '.[] | {name, state, version: .firmwareVersion, "
+            "pairedCameras: (.pairedCameras // .cameras // .connectedCameras), "
+            "streamMappings: (.streamMappings // .streams // .channels), "
+            "capacity: (.capacity // .usage // .load)}' "
+            "/etc/unifi-protect/jsonDb/aiports.json 2>/dev/null; "
+            "echo '== top-level keys =='; jq -S '.[0] | keys' /etc/unifi-protect/jsonDb/aiports.json"
+        ),
+        "desc": "AI Port pairing and stream mapping. Field-whitelisted plus a key listing.",
+    },
+    "protect-live-sample": {
+        # top's first iteration reports since-boot averages, so it is skipped;
+        # every following iteration is a true 3-second interval sample.
+        "lines_shell": lambda n: (
+            f"top -b -d 3 -n {max(2, n)} -o -%CPU 2>/dev/null | "
+            "awk '/^top -/{i++; if(i>1) print \"=== \" $3} "
+            "i>1 && ($NF ~ /^(ms|mst|msr_main|unifi-protect|gst-launch.*)$/ || $12 ~ /^(ms|mst|msr_main|unifi-protect)$/)'"
+        ),
+        "desc": (
+            "Sample the Protect media pipeline processes every 3s while someone "
+            "watches a stream. --lines sets the number of samples."
+        ),
+    },
+    "protect-rtsp-sessions": {
+        # The first dst= field of an entry is the original direction, the
+        # camera being pulled from. The second is the reply direction.
+        "shell": (
+            "conntrack -L -p tcp --dport 554 --state ESTABLISHED 2>/dev/null | "
+            "awk '{for (i = 1; i <= NF; i++) if ($i ~ /^dst=/) { print substr($i, 5); break }}' | "
+            "sort | uniq -c"
+        ),
+        "desc": "Established RTSP sessions per camera address, from connection tracking.",
+    },
+    "protect-compat-mode": {
+        # The field name for stream compatibility mode is not documented, so
+        # this walks each camera record for any key mentioning compat/improve
+        # rather than guessing one path.
+        "shell": (
+            "python3 - <<'PYEOF'\n"
+            "import json\n"
+            "cams = json.load(open('/etc/unifi-protect/jsonDb/cameras.json'))\n"
+            "def walk(o, p=''):\n"
+            "    if isinstance(o, dict):\n"
+            "        for k, v in o.items():\n"
+            "            if any(t in k.lower() for t in ('compat', 'improve')):\n"
+            "                yield p + k, v\n"
+            "            yield from walk(v, p + k + '.')\n"
+            "    elif isinstance(o, list):\n"
+            "        for i, v in enumerate(o):\n"
+            "            yield from walk(v, p + str(i) + '.')\n"
+            "for c in cams:\n"
+            "    hits = list(walk(c))\n"
+            "    print(f\"{c.get('name')!s:24} {hits if hits else '(no compat keys)'}\")\n"
+            "PYEOF"
+        ),
+        "desc": "Per-camera stream compatibility mode fields from the Protect config store.",
+    },
+    "protect-nvr-config": {
+        "shell": (
+            "jq -S '.[] | {name, version, isRecordingDisabled, isRecycling, "
+            "recordingRetentionDurationMs, storageStats: .storageStats, "
+            "systemInfo: {cpu: .systemInfo.cpu, memory: .systemInfo.memory, "
+            "times: .systemInfo.times}, "
+            "featureFlags: .featureFlags}' /etc/unifi-protect/jsonDb/nvrs.json"
+        ),
+        "desc": "NVR storage, retention, and recycling state. Field-whitelisted.",
+    },
+    "protect-logs-dir": {
+        "shell": "ls -laS /srv/unifi-protect/logs 2>/dev/null | head -25",
+        "desc": "Protect's own log files, largest first. It logs here, not only to journald.",
+    },
+    "protect-stream-log": {
+        "lines_shell": lambda n: (
+            # The numbered suffix flips between 1 and 2 on rotation, so always
+            # follow whichever file is newest.
+            "ls -t /srv/unifi-protect/logs/video.ems.streams*.log 2>/dev/null | "
+            f"head -1 | xargs -r tail -n {n}"
+        ),
+        "desc": "Tail of Protect's streaming engine log, rotation-aware. Use --lines.",
+    },
+    "protect-stream-errors": {
+        "lines_shell": lambda n: (
+            "cat /srv/unifi-protect/logs/video.ems.streams*.log "
+            "/srv/unifi-protect/logs/cameras.avclient*.log 2>/dev/null | "
+            "grep -ihE 'error|fail|timeout|drop|reconnect|stall|overflow|"
+            "restart|discontinu|out of order|late|desync|jitter' | "
+            f"tail -n {n}"
+        ),
+        "desc": "Stream and RTSP client errors from Protect's own logs. Use --lines.",
+    },
+    "protect-log": {
+        "lines_shell": lambda n: f"journalctl -u unifi-protect --no-pager -n {n} 2>&1",
+        "desc": "Protect service log. Use --lines. Where stream and recording errors surface.",
+    },
+    "protect-errors": {
+        "lines_shell": lambda n: (
+            "journalctl -u unifi-protect --no-pager --since '24 hours ago' 2>&1 | "
+            "grep -iE 'error|fail|timeout|drop|reconnect|disconnect|stall|overflow' | "
+            f"tail -n {n}"
+        ),
+        "desc": "Recent Protect errors only, last 24h. Use --lines.",
+    },
+    "ubv-timing": {
+        "mac_shell": lambda mac, n, day: (
+            f"UBV=$(ls -t /srv/unifi-protect/video/{day}/{mac}_0_rotating_*.ubv 2>/dev/null | head -1); "
+            "[ -z \"$UBV\" ] && { echo 'no rotating ubv for that mac'; exit 0; }; "
+            "TOOL=$(command -v ubnt_ubvinfo || "
+            "find /usr /opt /srv/unifi-protect -name '*ubvinfo*' -type f 2>/dev/null | head -1); "
+            "[ -z \"$TOOL\" ] && { echo 'ubvinfo tool not found'; exit 0; }; "
+            "echo \"file: $UBV\"; echo \"tool: $TOOL\"; "
+            # -r 1000 puts every timestamp in milliseconds regardless of the
+            # track's native clock rate, which is what the delta analysis needs.
+            f"\"$TOOL\" -f \"$UBV\" -r 1000 2>/dev/null | tail -n {n}"
+        ),
+        "desc": (
+            "Per-frame timing table from the newest high-channel recording of one "
+            "camera. Needs --mac (12 hex digits). Use --lines for the frame count."
+        ),
+    },
+    "tcpdump": {
+        "sensitive": True,
+        "desc": (
+            "Live packet capture. Records real traffic, so ask before running "
+            "and keep the packet count small. Needs --iface."
+        ),
+    },
+    "mca-dump": {
+        "argv": ["mca-dump"],
+        "sensitive": True,
+        "desc": (
+            "Full console configuration as JSON. Contains WiFi passphrases and "
+            "other secrets, so ask before running and never paste it verbatim."
+        ),
+    },
+}
+
+
+class SshError(Exception):
+    """Fatal, user-facing error. Printed without a traceback."""
+
+
+def load_config():
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as exc:
+        raise SshError(f"Config file is not valid JSON ({CONFIG_PATH}): {exc}")
+
+
+def resolve_host(args):
+    host = args.host or os.environ.get("UNIFI_HOST") or load_config().get("host")
+    if not host:
+        raise SshError(
+            "No console host known. Pass --host <console-address>, set UNIFI_HOST,\n"
+            "or run the API client's setup first."
+        )
+    return host
+
+
+def build_remote_command(args):
+    check = CHECKS.get(args.check)
+    if check is None:
+        known = ", ".join(sorted(CHECKS))
+        raise SshError(f"Unknown check '{args.check}'. Available: {known}")
+
+    if check.get("sensitive") and not args.confirm:
+        raise SshError(
+            f"'{args.check}' is marked sensitive: {check['desc']}\n"
+            "Confirm with the user, then re-run with --confirm."
+        )
+
+    if args.check == "tcpdump":
+        return build_tcpdump(args)
+    if "mac_shell" in check:
+        mac = (args.mac or "").upper().replace(":", "")
+        if not re.fullmatch(r"[0-9A-F]{12}", mac):
+            raise SshError(f"'{args.check}' needs --mac as 12 hex digits (colons allowed).")
+        day = "*/*/*"
+        if args.date:
+            if not re.fullmatch(r"\d{4}/\d{2}/\d{2}", args.date):
+                raise SshError("--date must be YYYY/MM/DD.")
+            day = args.date
+        return check["mac_shell"](mac, args.lines, day)
+    if "lines_argv" in check:
+        return " ".join(shlex.quote(part) for part in check["lines_argv"](args.lines))
+    if "lines_shell" in check:
+        return check["lines_shell"](args.lines)
+    if "shell" in check:
+        return check["shell"]
+    return " ".join(shlex.quote(part) for part in check["argv"])
+
+
+def build_tcpdump(args):
+    if not args.iface:
+        raise SshError("tcpdump needs --iface. Run the 'addr-brief' check to list interfaces.")
+    if args.count < 1 or args.count > MAX_TCPDUMP_PACKETS:
+        raise SshError(f"--count must be between 1 and {MAX_TCPDUMP_PACKETS}.")
+    # -n avoids reverse DNS lookups, and no -w option is offered, so nothing is
+    # written to the console's filesystem.
+    argv = ["tcpdump", "-n", "-l", "-c", str(args.count), "-i", args.iface]
+    if args.filter:
+        argv.extend(shlex.split(args.filter))
+    return " ".join(shlex.quote(part) for part in argv)
+
+
+def ssh_argv(args, host, remote_command):
+    """Assemble the ssh invocation.
+
+    Connection settings for the console - user, auth methods, host key policy,
+    agent exposure - live in the standard ssh configuration (a Host block for
+    the console), not here. The script only names the host, applies the
+    timeout, and delivers the password through askpass.
+    """
+    argv = ["ssh", "-o", f"ConnectTimeout={int(args.connect_timeout)}"]
+    if args.port:
+        argv += ["-p", str(args.port)]
+    if args.user:
+        argv += ["-l", args.user]
+    argv += [host, remote_command]
+    return argv
+
+
+def ssh_env():
+    if not os.environ.get("UNIFI_SSH_PASSWORD", "").strip():
+        raise SshError(
+            "UNIFI_SSH_PASSWORD is not set. Supply the console's SSH password through\n"
+            "it for the command, for example from a secret manager."
+        )
+    if not os.access(ASKPASS, os.X_OK):
+        raise SshError(f"Askpass helper is missing or not executable: {ASKPASS}")
+    env = dict(os.environ)
+    env["SSH_ASKPASS"] = ASKPASS
+    env["SSH_ASKPASS_REQUIRE"] = "force"
+    env.pop("DISPLAY", None)
+    return env
+
+
+# --- subcommands -------------------------------------------------------------
+
+
+def cmd_list(args):
+    width = max(len(name) for name in CHECKS)
+    for name in sorted(CHECKS):
+        check = CHECKS[name]
+        marker = " [sensitive]" if check.get("sensitive") else ""
+        print(f"{name.ljust(width)}  {check['desc']}{marker}")
+
+
+def cmd_run(args):
+    host = resolve_host(args)
+    remote_command = build_remote_command(args)
+
+    if args.dry_run:
+        print(remote_command)
+        return
+
+    # One attempt, no retry loop. A hang here means the console is unreachable,
+    # and hammering it does not help.
+    try:
+        result = subprocess.run(
+            ssh_argv(args, host, remote_command),
+            env=ssh_env(),
+            capture_output=True,
+            text=True,
+            timeout=args.timeout,
+        )
+    except subprocess.TimeoutExpired:
+        raise SshError(
+            f"No response within {args.timeout}s. The console may be unreachable."
+        )
+
+    if result.stdout:
+        print(truncate(result.stdout, args.head), end="")
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if "Host key verification failed" in stderr:
+            raise SshError(
+                "Host key verification failed. The console's key changed, which a\n"
+                "firmware reinstall explains and an interception attempt also does.\n"
+                f"Confirm the change, then remove the stale entry: ssh-keygen -R {host}\n"
+                "The next connection records the new fingerprint."
+            )
+        if "Permission denied" in stderr:
+            raise SshError(
+                "Password rejected. Check that UNIFI_SSH_PASSWORD matches the SSH\n"
+                "password set in the UniFi OS console settings."
+            )
+        raise SshError(f"ssh exited {result.returncode}: {stderr}")
+
+
+def truncate(text, head):
+    if not head:
+        return text
+    lines = text.splitlines(keepends=True)
+    if len(lines) <= head:
+        return text
+    kept = "".join(lines[:head])
+    return f"{kept}... output truncated at {head} lines, re-run with --head 0 for all\n"
+
+
+# --- argument parsing --------------------------------------------------------
+
+
+# Shared flags are attached to both the top-level parser and every subparser so
+# they are accepted on either side of the command word. SUPPRESS defaults stop a
+# subparser from overwriting a value the top-level parser already captured; the
+# real defaults are applied once after parsing.
+COMMON_DEFAULTS = {
+    "host": None,
+    "port": None,
+    "user": None,
+    "connect_timeout": 10.0,
+    "timeout": 120.0,
+}
+
+
+def common_flags():
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--host",
+        default=argparse.SUPPRESS,
+        help="Console address. Defaults to UNIFI_HOST, then the saved config.",
+    )
+    common.add_argument(
+        "--port",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="SSH port. Defaults to the ssh configuration.",
+    )
+    common.add_argument(
+        "--user",
+        default=argparse.SUPPRESS,
+        help="SSH user. Defaults to the ssh configuration.",
+    )
+    common.add_argument(
+        "--connect-timeout",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="TCP connect timeout in seconds (default: 10).",
+    )
+    common.add_argument(
+        "--timeout",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Overall command timeout in seconds (default: 120).",
+    )
+    return common
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="unifi-ssh",
+        parents=[common_flags()],
+        description="Run read-only diagnostics on a UniFi console over SSH.",
+        epilog=(
+            "Prefer the `unifi` API client whenever it can answer the question.\n"
+            "\n"
+            "The SSH password is read from UNIFI_SSH_PASSWORD.\n"
+            "\n"
+            "Examples:\n"
+            "  unifi-ssh list\n"
+            "  unifi-ssh run --check nft\n"
+            "  unifi-ssh run --check journal --lines 100\n"
+            "  unifi-ssh run --check tcpdump --iface eth0 --count 50 --confirm\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True, metavar="<command>")
+
+    sub = subparsers.add_parser("list", parents=[common_flags()], help="List the available checks.")
+    sub.set_defaults(func=cmd_list)
+
+    sub = subparsers.add_parser("run", parents=[common_flags()], help="Run one check.")
+    sub.add_argument("--check", required=True, help="Check name. See `unifi-ssh list`.")
+    sub.add_argument("--lines", type=int, default=200, help="Line count for journal and dmesg (default: 200).")
+    sub.add_argument("--head", type=int, default=400, help="Truncate output to N lines (0 = no limit, default: 400).")
+    sub.add_argument("--iface", help="Interface for tcpdump.")
+    sub.add_argument("--mac", help="Camera MAC for ubv-timing (12 hex digits, colons allowed).")
+    sub.add_argument("--date", help="Recording day for ubv-timing as YYYY/MM/DD (default: newest).")
+    sub.add_argument("--count", type=int, default=50, help=f"Packet count for tcpdump (default: 50, max: {MAX_TCPDUMP_PACKETS}).")
+    sub.add_argument("--filter", help="pcap filter expression for tcpdump.")
+    sub.add_argument("--confirm", action="store_true", help="Required for checks marked sensitive.")
+    sub.add_argument("--dry-run", action="store_true", help="Print the remote command without connecting.")
+    sub.set_defaults(func=cmd_run)
+
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+    for name, value in COMMON_DEFAULTS.items():
+        if not hasattr(args, name):
+            setattr(args, name, value)
+    try:
+        args.func(args)
+    except SshError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

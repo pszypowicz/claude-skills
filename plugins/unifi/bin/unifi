@@ -1,0 +1,642 @@
+#!/usr/bin/env python3
+"""Read-only client for the local UniFi Network Integration API.
+
+Talks directly to a UniFi console on the LAN. Nothing is sent to Ubiquiti's
+cloud and no credentials are passed on the command line.
+
+Read-only is an invariant of this tool, not a configuration choice: the HTTP
+layer issues GET only, so no subcommand can mutate console state.
+"""
+
+import argparse
+import getpass
+import hashlib
+import http.client
+import json
+import os
+import re
+import shutil
+import ssl
+import subprocess
+import sys
+import urllib.parse
+
+CONFIG_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "unifi"
+)
+CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
+KEYCHAIN_SERVICE = "unifi-integration-api-key"
+API_ROOT = "/proxy/network/integration/v1"
+PAGE_SIZE = 200
+
+
+class UnifiError(Exception):
+    """Fatal, user-facing error. Printed without a traceback."""
+
+
+# --- configuration -----------------------------------------------------------
+
+
+def load_config():
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as exc:
+        raise UnifiError(f"Config file is not valid JSON ({CONFIG_PATH}): {exc}")
+
+
+def save_config(config):
+    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
+    tmp = CONFIG_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(config, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, CONFIG_PATH)
+
+
+def resolve_host(args):
+    host = args.host or os.environ.get("UNIFI_HOST") or load_config().get("host")
+    if not host:
+        raise UnifiError(
+            "No console host known. Pass --host <console-dns-name>, set UNIFI_HOST,\n"
+            "or run: unifi setup --host <console-dns-name>"
+        )
+    return host
+
+
+def normalize_fingerprint(raw):
+    """Return a SHA-256 fingerprint as 64 lowercase hex digits.
+
+    Accepts colon-separated hex and the `openssl x509 -fingerprint` output line.
+    """
+    value = raw.strip().lower()
+    if value.startswith("sha256 fingerprint="):
+        value = value.split("=", 1)[1]
+    value = value.replace(":", "")
+    if not re.fullmatch(r"[0-9a-f]{64}", value):
+        raise UnifiError(
+            f"Not a SHA-256 certificate fingerprint: {raw!r}\n"
+            "Expected 64 hex digits, colons allowed."
+        )
+    return value
+
+
+def resolve_pin(args):
+    raw = args.cert_sha256 or os.environ.get("UNIFI_CERT_SHA256") or load_config().get("cert_sha256")
+    return normalize_fingerprint(raw) if raw else None
+
+
+# --- credential storage ------------------------------------------------------
+
+
+def keychain_available():
+    """True on macOS, where `security` reaches the login Keychain."""
+    return sys.platform == "darwin" and shutil.which("security") is not None
+
+
+def keychain_get(host):
+    if not keychain_available():
+        return None
+    result = subprocess.run(
+        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", host, "-w"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def get_api_key(host):
+    """Read the API key from UNIFI_API_KEY, falling back to the macOS Keychain.
+
+    The environment comes first so a secret manager can supply the key for one
+    command without it reaching a file or a command line.
+    """
+    from_env = os.environ.get("UNIFI_API_KEY", "").strip()
+    if from_env:
+        return from_env
+    from_keychain = keychain_get(host)
+    if from_keychain:
+        return from_keychain
+    message = f"No API key available for {host}. Set UNIFI_API_KEY for the command"
+    if keychain_available():
+        message += f",\nor store a key in the Keychain with: unifi setup --host {host}"
+    raise UnifiError(message)
+
+
+def keychain_set(host, api_key):
+    if not keychain_available():
+        raise UnifiError("No Keychain on this platform. Supply the key through UNIFI_API_KEY instead.")
+    # -U updates an existing item instead of failing. The key reaches `security`
+    # through argv, which is visible to other processes on this machine for the
+    # lifetime of the call; the alternative interfaces are not available here.
+    result = subprocess.run(
+        [
+            "security", "add-generic-password",
+            "-s", KEYCHAIN_SERVICE,
+            "-a", host,
+            "-w", api_key,
+            "-D", "UniFi Network API key",
+            "-U",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise UnifiError(f"Could not store the key in the Keychain: {result.stderr.strip()}")
+
+
+# --- transport ---------------------------------------------------------------
+
+
+def unverified_context():
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
+def tls_context(pin):
+    if pin is None:
+        # System trust store plus host-name check.
+        return ssl.create_default_context()
+    # A pin replaces chain and host-name validation. The console must present
+    # exactly the pinned certificate, which check_pin confirms before any
+    # request, and so before the API key, is sent.
+    return unverified_context()
+
+
+def peer_fingerprint(sock):
+    der = sock.getpeercert(binary_form=True)
+    return hashlib.sha256(der).hexdigest() if der else None
+
+
+def format_fingerprint(value):
+    if not value:
+        return "(none)"
+    return ":".join(value[i : i + 2] for i in range(0, len(value), 2)).upper()
+
+
+def check_pin(sock, pin, host):
+    presented = peer_fingerprint(sock)
+    if presented == pin:
+        return
+    raise UnifiError(
+        f"The certificate {host} presented does not match the pinned fingerprint.\n"
+        f"  pinned:    {format_fingerprint(pin)}\n"
+        f"  presented: {format_fingerprint(presented)}\n"
+        "A console reset or a replaced certificate explains this, and so does\n"
+        "interception. Confirm which it is before pinning the new fingerprint."
+    )
+
+
+def open_connection(args, host, context, pin=None):
+    """Connect and finish the TLS handshake, then check the pin if one is set."""
+    connection = http.client.HTTPSConnection(
+        host, args.port, timeout=args.timeout, context=context
+    )
+    try:
+        connection.connect()
+        if pin is not None:
+            check_pin(connection.sock, pin, host)
+    except ssl.SSLCertVerificationError as exc:
+        connection.close()
+        raise UnifiError(describe_tls_error(exc, host))
+    except OSError as exc:
+        connection.close()
+        raise UnifiError(f"Cannot reach {host}:{args.port} - {exc}")
+    except UnifiError:
+        connection.close()
+        raise
+    return connection
+
+
+def api_get(args, path, params=None):
+    """Issue one GET against the Integration API and return the decoded body."""
+    host = resolve_host(args)
+    target = path
+    if params:
+        separator = "&" if "?" in path else "?"
+        target = f"{path}{separator}{urllib.parse.urlencode(params)}"
+    api_key = get_api_key(host)
+    pin = resolve_pin(args)
+
+    connection = open_connection(args, host, tls_context(pin), pin)
+    try:
+        connection.request(
+            "GET", target, headers={"X-API-KEY": api_key, "Accept": "application/json"}
+        )
+        response = connection.getresponse()
+        body = response.read()
+    except (OSError, http.client.HTTPException) as exc:
+        raise UnifiError(f"Request to {host}:{args.port} failed - {exc}")
+    finally:
+        connection.close()
+
+    if response.status >= 300:
+        raise UnifiError(describe_http_error(response.status, response.reason, host, path))
+    if not body:
+        return None
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        raise UnifiError(f"Console returned a non-JSON body for {path}")
+
+
+def describe_tls_error(exc, host):
+    reason = getattr(exc, "verify_message", None) or exc
+    return (
+        f"TLS certificate verification failed for {host}: {reason}.\n"
+        "Use a host name the console's certificate covers. If the console serves a\n"
+        "self-signed certificate, pin it instead: read it with `unifi cert-fingerprint`,\n"
+        "confirm the value, then pass it with --cert-sha256 or save it with setup."
+    )
+
+
+def describe_http_error(status, reason, host, path):
+    if status == 401:
+        return (
+            f"API key rejected by {host} (401).\n"
+            f"Create a new key in the console UI under Settings > Control Plane >\n"
+            f"Integrations, then run: unifi setup --host {host}"
+        )
+    if status == 403:
+        return f"API key lacks permission for {path} (403)."
+    if status == 404:
+        return (
+            f"{path} not found (404). The Integration API needs UniFi Network 9.0\n"
+            "or newer; older consoles do not expose these endpoints."
+        )
+    if status == 429:
+        return "Console is rate limiting requests (429). Wait a moment and retry."
+    if status < 400:
+        return f"Unexpected redirect ({status}) from {host} for {path}."
+    return f"HTTP {status} from {host} for {path}: {reason}"
+
+
+def is_page(body):
+    """True when `body` is one page of an offset-paged Integration API list."""
+    return (
+        isinstance(body, dict)
+        and isinstance(body.get("data"), list)
+        and isinstance(body.get("totalCount"), int)
+    )
+
+
+def api_get_paged(args, path, first_page=None):
+    """Follow the Integration API's offset pagination and return every record.
+
+    `first_page` is an already fetched page at offset 0. Paging continues from
+    the end of it, so the request that produced it is not repeated.
+    """
+    records = []
+    offset = 0
+    page = first_page
+    while True:
+        if page is None:
+            page = api_get(args, path, {"offset": offset, "limit": PAGE_SIZE})
+            if page is None:
+                break
+        batch = page.get("data", [])
+        records.extend(batch)
+        total = page.get("totalCount")
+        offset += len(batch)
+        if not batch or total is None or offset >= total:
+            break
+        if args.max_records and len(records) >= args.max_records:
+            break
+        page = None
+    if args.max_records:
+        return records[: args.max_records]
+    return records
+
+
+# --- output ------------------------------------------------------------------
+
+
+def scalar(value):
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, separators=(",", ":"))
+    return str(value)
+
+
+def render_table(rows, preferred):
+    if not rows:
+        return "(no records)"
+    columns = [key for key in preferred if any(key in row for row in rows)]
+    if not columns:
+        columns = [key for key, value in rows[0].items() if not isinstance(value, (dict, list))][:6]
+    widths = {col: len(col) for col in columns}
+    cells = []
+    for row in rows:
+        cell = {col: scalar(row.get(col)) for col in columns}
+        for col in columns:
+            widths[col] = max(widths[col], len(cell[col]))
+        cells.append(cell)
+    lines = [
+        "  ".join(col.ljust(widths[col]) for col in columns).rstrip(),
+        "  ".join("-" * widths[col] for col in columns).rstrip(),
+    ]
+    for cell in cells:
+        lines.append("  ".join(cell[col].ljust(widths[col]) for col in columns).rstrip())
+    return "\n".join(lines)
+
+
+def emit(args, payload, preferred=None):
+    if args.format == "json" or preferred is None:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    rows = payload if isinstance(payload, list) else [payload]
+    print(render_table(rows, preferred))
+
+
+# --- site helpers ------------------------------------------------------------
+
+
+def resolve_site(args):
+    if args.site:
+        return args.site
+    cached = load_config().get("site")
+    if cached:
+        return cached
+    sites = api_get_paged(args, f"{API_ROOT}/sites")
+    if not sites:
+        raise UnifiError("Console reported no sites. Is the Network application running?")
+    if len(sites) > 1:
+        names = ", ".join(f"{s.get('name')} ({s.get('id')})" for s in sites)
+        raise UnifiError(f"Multiple sites exist, pass --site <id>. Available: {names}")
+    return sites[0]["id"]
+
+
+# --- subcommands -------------------------------------------------------------
+
+
+def cmd_setup(args):
+    host = args.host or os.environ.get("UNIFI_HOST") or load_config().get("host")
+    if not host:
+        raise UnifiError("Pass --host <console-dns-name> so the key is bound to a known console.")
+
+    from_env = bool(os.environ.get("UNIFI_API_KEY", "").strip())
+    if not from_env and not keychain_available():
+        raise UnifiError(
+            "Set UNIFI_API_KEY for the setup command. Without a macOS Keychain there\n"
+            "is nowhere to store a pasted key."
+        )
+
+    config = load_config()
+    if config.get("host") != host:
+        # The cached site and pin belong to the previous console.
+        config.pop("site", None)
+        config.pop("cert_sha256", None)
+    config["host"] = host
+    if args.cert_sha256:
+        config["cert_sha256"] = normalize_fingerprint(args.cert_sha256)
+    save_config(config)
+
+    # A key supplied through the environment belongs to whatever injected it.
+    # Copying it into the Keychain would fork the secret into a second store
+    # that has to be rotated separately.
+    if from_env:
+        print("\nUsing the API key from the environment. Nothing stored in the Keychain.")
+    else:
+        if sys.stdin.isatty():
+            api_key = getpass.getpass("Paste the UniFi API key (input hidden): ").strip()
+        else:
+            api_key = sys.stdin.read().strip()
+        if not api_key:
+            raise UnifiError("No API key supplied.")
+        keychain_set(host, api_key)
+
+    args.host = host
+    sites = api_get_paged(args, f"{API_ROOT}/sites")
+    print(f"\nKey accepted. {len(sites)} site(s) visible:")
+    print(render_table(sites, ["id", "name"]))
+    if len(sites) == 1:
+        config["site"] = sites[0]["id"]
+        save_config(config)
+        print(f"\nDefaulting to site {sites[0].get('name')} for future calls.")
+
+
+def cmd_cert_fingerprint(args):
+    # Read the certificate without validating it and without sending a
+    # request, so no key is involved.
+    host = resolve_host(args)
+    connection = open_connection(args, host, unverified_context())
+    try:
+        print(format_fingerprint(peer_fingerprint(connection.sock)))
+    finally:
+        connection.close()
+
+
+def cmd_info(args):
+    emit(args, api_get(args, f"{API_ROOT}/info"))
+
+
+def cmd_sites(args):
+    emit(args, api_get_paged(args, f"{API_ROOT}/sites"), ["id", "name"])
+
+
+def cmd_devices(args):
+    site = resolve_site(args)
+    emit(
+        args,
+        api_get_paged(args, f"{API_ROOT}/sites/{site}/devices"),
+        ["name", "model", "ipAddress", "state", "macAddress", "firmwareVersion", "id"],
+    )
+
+
+def cmd_device(args):
+    site = resolve_site(args)
+    emit(args, api_get(args, f"{API_ROOT}/sites/{site}/devices/{args.id}"))
+
+
+def cmd_device_stats(args):
+    site = resolve_site(args)
+    emit(args, api_get(args, f"{API_ROOT}/sites/{site}/devices/{args.id}/statistics/latest"))
+
+
+def cmd_clients(args):
+    site = resolve_site(args)
+    emit(
+        args,
+        api_get_paged(args, f"{API_ROOT}/sites/{site}/clients"),
+        ["name", "ipAddress", "macAddress", "type", "connectedAt", "id"],
+    )
+
+
+def cmd_client(args):
+    site = resolve_site(args)
+    emit(args, api_get(args, f"{API_ROOT}/sites/{site}/clients/{args.id}"))
+
+
+def cmd_get(args):
+    path = args.path if args.path.startswith("/") else f"{API_ROOT}/{args.path}"
+    body = api_get(args, path)
+    if not is_page(body):
+        emit(args, body)
+        return
+    query = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+    if "offset" in query or "limit" in query:
+        # The caller asked for a specific page, so return that page as is.
+        start = body.get("offset") or 0
+        count = len(body["data"])
+        total = body["totalCount"]
+        if start > 0 or count < total:
+            print(
+                f"note: this page holds {count} of {total} records, starting at "
+                f"offset {start}. Drop offset and limit from --path to get every record.",
+                file=sys.stderr,
+            )
+        emit(args, body)
+        return
+    emit(args, api_get_paged(args, path, first_page=body))
+
+
+# --- argument parsing --------------------------------------------------------
+
+
+# Shared flags are attached to both the top-level parser and every subparser so
+# they are accepted on either side of the command word. That requires SUPPRESS
+# defaults, otherwise the subparser would overwrite a value the top-level parser
+# already captured; the real defaults are applied once after parsing.
+COMMON_DEFAULTS = {
+    "host": None,
+    "port": 443,
+    "site": None,
+    "format": "json",
+    "timeout": 15.0,
+    "max_records": 0,
+    "cert_sha256": None,
+}
+
+
+def common_flags():
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument(
+        "--host",
+        default=argparse.SUPPRESS,
+        help="Console address. Defaults to UNIFI_HOST, then the saved config.",
+    )
+    common.add_argument(
+        "--port", type=int, default=argparse.SUPPRESS, help="Console HTTPS port (default: 443)."
+    )
+    common.add_argument(
+        "--site",
+        default=argparse.SUPPRESS,
+        help="Site id. Defaults to the saved site, or the only site.",
+    )
+    common.add_argument(
+        "--format",
+        choices=["json", "table"],
+        default=argparse.SUPPRESS,
+        help="Output format (default: json). Table is available for list commands.",
+    )
+    common.add_argument(
+        "--timeout",
+        type=float,
+        default=argparse.SUPPRESS,
+        help="Per-request timeout in seconds (default: 15).",
+    )
+    common.add_argument(
+        "--max-records",
+        type=int,
+        default=argparse.SUPPRESS,
+        help="Stop after N records on paged endpoints (0 = all).",
+    )
+    common.add_argument(
+        "--cert-sha256",
+        default=argparse.SUPPRESS,
+        help=(
+            "Trust the console's certificate by SHA-256 fingerprint instead of the "
+            "system trust store. Defaults to UNIFI_CERT_SHA256, then the saved config."
+        ),
+    )
+    return common
+
+
+def build_parser():
+    common = common_flags()
+    parser = argparse.ArgumentParser(
+        prog="unifi",
+        parents=[common],
+        description="Read-only client for the local UniFi Network Integration API.",
+        epilog=(
+            "Examples:\n"
+            "  unifi setup --host unifi.lan.example.net   # store the console host and API key\n"
+            "  unifi devices --format table       # every adopted device on the default site\n"
+            "  unifi clients --format table       # currently connected clients\n"
+            "  unifi get --path sites             # raw GET against any v1 endpoint\n"
+            "  unifi cert-fingerprint --host 192.168.1.1   # fingerprint to pin a self-signed console\n"
+            "\n"
+            "The API key is read from UNIFI_API_KEY, then from the macOS Keychain.\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True, metavar="<command>")
+
+    def add(name, help_text, handler):
+        sub = subparsers.add_parser(name, parents=[common_flags()], help=help_text)
+        sub.set_defaults(func=handler)
+        return sub
+
+    add("setup", "Store the console host and an API key.", cmd_setup)
+    add(
+        "cert-fingerprint",
+        "Print the SHA-256 fingerprint of the certificate the console presents.",
+        cmd_cert_fingerprint,
+    )
+    add("info", "Network application version and metadata.", cmd_info)
+    add("sites", "List sites on the console.", cmd_sites)
+    add("devices", "List adopted UniFi devices.", cmd_devices)
+
+    sub = add("device", "Show one device in full detail.", cmd_device)
+    sub.add_argument("--id", required=True, help="Device id from `unifi devices`.")
+
+    sub = add("device-stats", "Latest statistics for one device.", cmd_device_stats)
+    sub.add_argument("--id", required=True, help="Device id from `unifi devices`.")
+
+    add("clients", "List connected clients.", cmd_clients)
+
+    sub = add("client", "Show one client in full detail.", cmd_client)
+    sub.add_argument("--id", required=True, help="Client id from `unifi clients`.")
+
+    sub = add("get", "GET an arbitrary Integration API path.", cmd_get)
+    sub.add_argument(
+        "--path",
+        required=True,
+        help=(
+            "Path relative to the v1 root (e.g. 'sites'), or an absolute path. A paged "
+            "list is followed to the end and printed as a plain array of records, "
+            "unless the path sets offset or limit itself."
+        ),
+    )
+
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+    for name, value in COMMON_DEFAULTS.items():
+        if not hasattr(args, name):
+            setattr(args, name, value)
+    try:
+        args.func(args)
+    except UnifiError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
