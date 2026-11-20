@@ -1,0 +1,22 @@
+#!/bin/sh
+# Supplies the console password to ssh through the SSH_ASKPASS interface.
+#
+# ssh passes the prompt text as the first argument. Answering only prompts that
+# ask for a password means a host key confirmation cannot be answered with the
+# password by accident, which is the failure mode that makes SSH_ASKPASS risky.
+# Nothing is stored here: the value arrives in UNIFI_SSH_PASSWORD, set by
+# whoever runs unifi-ssh.
+
+case "$1" in
+    *[Pp]assword*|*[Pp]assphrase*)
+        if [ -z "${UNIFI_SSH_PASSWORD}" ]; then
+            echo "unifi-askpass: UNIFI_SSH_PASSWORD is not set" >&2
+            exit 1
+        fi
+        printf '%s' "${UNIFI_SSH_PASSWORD}"
+        ;;
+    *)
+        echo "unifi-askpass: refusing to answer a non-password prompt: $1" >&2
+        exit 1
+        ;;
+esac

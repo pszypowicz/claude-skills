@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "claude-skills",
-  "version": "2.2.0",
-  "description": "Personal Claude Code plugins: Azure DevOps, Go, Swift (concurrency + modern features), house style, GitHub MCP, transcript timestamps, and Home Assistant integration upgrades.",
+  "version": "2.3.0",
+  "description": "Personal Claude Code plugins: Azure DevOps, Go, Swift (concurrency + modern features), house style, GitHub MCP, transcript timestamps, Home Assistant integration upgrades, and a read-only UniFi console client.",
   "owner": {
     "name": "Przemyslaw Szypowicz"
   },
@@ -62,6 +62,13 @@
       "description": "Move a Home Assistant custom integration to the next core release, one minor at a time, and use each release to adopt new core helpers and simplify the code.",
       "version": "0.2.0",
       "tags": ["home-assistant", "custom-integration", "upgrade", "deprecations", "python"]
+    },
+    {
+      "name": "unifi",
+      "source": "./plugins/unifi",
+      "description": "Read-only investigation of a local UniFi console through its Integration API, with an SSH fallback for firewall rules, routes, DHCP leases, logs, and packet capture.",
+      "version": "1.0.0",
+      "tags": ["unifi", "ubiquiti", "networking", "homelab", "read-only", "ssh"]
     }
   ]
 }

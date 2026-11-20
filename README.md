@@ -23,6 +23,7 @@ Once added, `/plugin` lists everything the marketplace offers. The marketplace i
 | [`github`](plugins/github/README.md)                                                              | 1.0.0   | GitHub's remote MCP server, limited to documentation search and the read-only security toolsets: code scanning, secret scanning, Dependabot alerts, and security advisories. Authenticates with the `gh` CLI keyring token, so no token variable is needed.                                       |
 | [`timestamps`](plugins/timestamps/README.md)                                                      | 0.2.0   | Show when each prompt, reply block, and tool call in the transcript was produced, as a dim time at the right edge of the row.                                                                                                                                                                     |
 | [`ha-integration-upgrade`](plugins/ha-integration-upgrade/skills/ha-integration-upgrade/SKILL.md) | 0.2.0   | Move a Home Assistant custom integration to the next core release, one minor at a time. Reports what breaks, what is deprecated, which new core helpers simplify the code, and which new capabilities open up, each with evidence from the developer blog or the core source at the release tags. |
+| [`unifi`](plugins/unifi/skills/unifi/SKILL.md)                                                    | 1.0.0   | Read-only investigation of a local UniFi console. Devices, clients, sites, and firmware come from the Integration API, and firewall rules, routes, DHCP leases, logs, Protect streams, and packet capture come over SSH. Reads credentials from environment variables, and can pin a self-signed console certificate. |
 
 ## Layout
 
@@ -34,6 +35,8 @@ plugins/<name>/
   skills/<skill>/SKILL.md          # skill entry point
   skills/<skill>/references/       # supporting reference material
   skills/<skill>/scripts/          # bundled shell scripts, where applicable
+  bin/                             # executables on the Bash tool's PATH while the plugin is enabled, where applicable
+  libexec/                         # helpers those executables call, kept off PATH, where applicable
   commands/                        # slash commands, where applicable
   hooks/                           # hook scripts and hooks.json, where applicable
   rules/                           # data files the hooks read, where applicable
